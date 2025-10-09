@@ -1,0 +1,41 @@
+/* アイコンボタンの基本スタイル */
+.clock {
+  /* 円形にする */
+  border-radius: 50%; 
+  
+  /* サイズを正方形に指定 */
+  width: 36px;
+  height: 36px;
+
+  /* アイコンを中央に配置するための設定 */
+  display: flex;
+  justify-content: center;
+  align-items: center;
+
+  /* 余白や枠線を調整 */
+  padding: 0;
+  border: 1px solid #dcdcdc;
+  background-color: #f7f9fa;
+  cursor: pointer;
+  
+  /* ホバー時の見た目を変更 */
+  transition: background-color 0.2s;
+}
+
+/* マウスが乗ったときの色 */
+.clock:hover {
+  background-color: #eef3f8;
+}
+
+/* 無効状態のスタイル */
+.clock:disabled {
+  background-color: #f7f9fa;
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ボタン内部のアイコンの色を指定 */
+.clock svg {
+  stroke: #3498db;
+}
+

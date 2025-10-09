@@ -201,6 +201,17 @@
     alert(`${userMessage}\n詳細: ${error?.message || '予期せぬエラーが発生しました'}`);
   };
 
+  /** SweetAlert2が利用可能かチェック */
+  const isSwalAvailable = () => typeof Swal !== 'undefined';
+
+  /** ユーザーへの通知（SweetAlert2優先） */
+  const notifyUser = (options) => {
+    if (isSwalAvailable()) {
+      Swal.fire(options);
+    } else {
+      alert(options.title + '\n' + options.text);
+    }
+  };
   // =================================================================
   // ヘルパー関数
   // =================================================================
@@ -408,6 +419,16 @@
    * @returns {Promise<boolean>} 処理成功時はtrue
    */
   const prepareStorageAppTransition = async (rec) => {
+    if (isSwalAvailable()) {
+      Swal.fire({
+        title: '保管材レコード処理中...',
+        text: '準備しています。',
+        allowOutsideClick: false,
+        didOpen: () => {
+          Swal.showLoading();
+        }
+      });
+    }
     try {
       const managementNo = rec?.[FIELDS.STORAGE_ID]?.value;
       const taskId = rec?.[FIELDS.TASK_ID]?.value;
@@ -417,6 +438,10 @@
       const query = managementNo
         ? `${FIELDS.STORAGE_ID} = "${managementNo}"`
         : `${FIELDS.TASK_ID} = "${taskId}"`;
+
+      if (isSwalAvailable()) {
+        Swal.update({ text: '既存の保管材レコードを検索しています...' });
+      }
 
       const getRes = await callKintoneApi(() =>
         kintone.api(kintone.api.url('/k/v1/records', true), 'GET', {
@@ -467,10 +492,16 @@
         updateBody.id = recordId;
         updateBody.revision = revision;
 
+        if (isSwalAvailable()) {
+          Swal.update({ text: '既存の保管材レコードを更新しています...' });
+        }
         await callKintoneApi(() =>
           kintone.api(kintone.api.url('/k/v1/record', true), 'PUT', updateBody)
         );
       } else {
+        if (isSwalAvailable()) {
+          Swal.update({ text: '新規に保管材レコードを作成しています...' });
+        }
         const postRes = await callKintoneApi(() =>
           kintone.api(kintone.api.url('/k/v1/record', true), 'POST', updateBody)
         );
@@ -481,9 +512,18 @@
         const url = `/k/${DEST_APP_ID}/show#record=${recordId}&mode=edit`;
         sessionStorage.setItem('navigateToAfterSave', url);
         return true;
+      } else {
+        // recordIdが取得できなかった場合
+        throw new Error('保管材レコードのIDが取得できませんでした。');
       }
-      return false;
     } catch (error) {
+      if (isSwalAvailable()) {
+        Swal.fire({
+          icon: 'error',
+          title: '保管材処理エラー',
+          text: error.message || '保管材レコードの準備中にエラーが発生しました。'
+        });
+      }
       handleError(error, ERROR_TYPES.STORAGE_ERROR, 'StorageTransition');
       return false;
     }
@@ -494,7 +534,13 @@
    * @returns {Promise<boolean>} 処理成功時はtrue
    */
   const promptAndPrepareStorageApp = async () => {
-    alert('保管材の入力をしてください。');
+    notifyUser({
+      icon: 'info',
+      title: '保管材入力',
+      text: '保管材の情報を更新します。処理完了後、保管材アプリの編集画面に移動します。',
+      confirmButtonText: 'OK'
+    });
+    // alert('保管材の入力をしてください。');
     const record = kintone.app.record.get().record;
     return await prepareStorageAppTransition(record);
   };
@@ -606,6 +652,23 @@
       return null;
     }
   };
+  
+  /**
+   * 状態に応じたアクションを決定するためのヘルパー関数群
+   */
+  const ProcessActionHelpers = {
+    isSplitDelivery: (record) =>
+      safeIncludes(record?.[FIELDS.SPLIT_DELIVERY_1]?.value, KEYWORDS.BUNNO) ||
+      safeIncludes(record?.[FIELDS.SPLIT_DELIVERY_2]?.value, KEYWORDS.BUNNO),
+    isStopAndStore: (record) =>
+      safeIncludes(record?.[FIELDS.FULL_DELIVERY_FLAG]?.value, KEYWORDS.STOP_AND_STORAGE),
+    isTotalQuantityZero: (record) => {
+      const total = record?.[FIELDS.TOTAL_QUANTITY]?.value;
+      return !total || Number.parseFloat(total) === 0;
+    },
+    isRemainingMaterialStorage: (record) =>
+      record?.[FIELDS.REMAINING_MATERIAL]?.value === KEYWORDS.STORAGE,
+  };
 
   /**
    * レコードの状態から、実行すべきプロセスアクションを決定する
@@ -617,13 +680,6 @@
 
       const status = record?.[FIELDS.STATUS]?.value;
       const external = record?.[FIELDS.OUTSOURCE_TYPE]?.value || OUTSOURCE_TYPES.NONE;
-      const zanasi = record?.[FIELDS.REMAINING_MATERIAL]?.value;
-
-      const isBunno =
-        safeIncludes(record?.[FIELDS.SPLIT_DELIVERY_1]?.value, KEYWORDS.BUNNO) ||
-        safeIncludes(record?.[FIELDS.SPLIT_DELIVERY_2]?.value, KEYWORDS.BUNNO);
-      const isKan = safeIncludes(record?.[FIELDS.FULL_DELIVERY_FLAG]?.value, KEYWORDS.STOP_AND_STORAGE);
-      const soukeijouSuuryou = record?.[FIELDS.TOTAL_QUANTITY]?.value;
 
       const createStatusUpdateAction = (nextStatus) => async () => {
         const currentRecordData = kintone.app.record.get().record;
@@ -654,45 +710,46 @@
         updateRecordAndSave(updates);
       };
 
+      // 状態: 作業中 の特殊な分岐ロジック
       if (status === STATUSES.WORKING) {
-        if (external === OUTSOURCE_TYPES.NONE) {
-          if (isBunno) {
-            if (!isKan) {
-              return { caption: '作業中断', onClick: createStatusUpdateAction(STATUSES.INTERRUPTED) };
-            } else {
-              if (soukeijouSuuryou && Number.parseFloat(soukeijouSuuryou) !== 0) {
-                return {
-                  caption: '全ストップ・計上要求',
-                  onClick: () => {
-                    alert('総計上数量が0になるようにしてください。作業を中断します。');
-                    updateRecordAndSave({
-                      [FIELDS.STATUS]: STATUSES.INTERRUPTED,
-                      [FIELDS.INTERRUPT_RETURN_STATUS]: status
-                    });
-                  }
-                };
-              } else {
-                const [caption] = processRoutes[external][status];
-                const onClick =
-                  zanasi === KEYWORDS.STORAGE
-                    ? async () => {
-                        const success = await promptAndPrepareStorageApp();
-                        if (success) {
-                          const today = getTodayString();
-                          updateRecordAndSave({
-                            [FIELDS.STATUS]: STATUSES.TRANSFER_DONE,
-                            [FIELDS.CHECK_DATE]: today,
-                            [FIELDS.DELIVERY_DATE]: today
-                          });
-                        }
-                      }
-                    : createStatusUpdateAction(STATUSES.TRANSFER_DONE);
-                return { caption, onClick };
-              }
-            }
+        // 分納フラグが立っている場合
+        if (ProcessActionHelpers.isSplitDelivery(record)) {
+          // 「一時作業停止し保管材へ」にチェックがない場合 -> 作業中断
+          if (!ProcessActionHelpers.isStopAndStore(record)) {
+            return { caption: '作業中断', onClick: createStatusUpdateAction(STATUSES.INTERRUPTED) };
           }
+          // 「一時作業停止し保管材へ」にチェックがある場合
+          // 総計上数量が0でない場合 -> 計上要求
+          if (!ProcessActionHelpers.isTotalQuantityZero(record)) {
+            return {
+              caption: '全ストップ・計上要求',
+              onClick: () => {
+                alert('総計上数量が0になるようにしてください。作業を中断します。');
+                updateRecordAndSave({
+                  [FIELDS.STATUS]: STATUSES.INTERRUPTED,
+                  [FIELDS.INTERRUPT_RETURN_STATUS]: status
+                });
+              }
+            };
+          }
+          // 総計上数量が0の場合 -> 明細転記済へ
+          const [caption] = processRoutes[external][status];
+          const onClick = ProcessActionHelpers.isRemainingMaterialStorage(record)
+            ? async () => {
+                if (await promptAndPrepareStorageApp()) {
+                  const today = getTodayString();
+                  updateRecordAndSave({
+                    [FIELDS.STATUS]: STATUSES.TRANSFER_DONE,
+                    [FIELDS.CHECK_DATE]: today,
+                    [FIELDS.DELIVERY_DATE]: today
+                  });
+                }
+              }
+            : createStatusUpdateAction(STATUSES.TRANSFER_DONE);
+          return { caption, onClick };
         }
-        if (zanasi === KEYWORDS.STORAGE) {
+        // 残材が「保管」の場合
+        if (ProcessActionHelpers.isRemainingMaterialStorage(record)) {
           const [caption, nextStatus] = processRoutes[external][status];
           return {
             caption,
@@ -704,6 +761,7 @@
         }
       }
 
+      // 通常のプロセスルート
       const route = processRoutes[external]?.[status];
       if (route) {
         const [caption, nextStatus] = route;

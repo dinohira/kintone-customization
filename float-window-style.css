@@ -1,0 +1,106 @@
+/* =================================================================
+  フローティングウィンドウ スタイル定義 (013デザイン準拠)
+================================================================= */
+
+.float-window {
+  position: fixed;
+  right: 2.5%;
+  top: 5%;
+  background: rgba(255,255,255,0.8);
+  border: 1px solid rgba(0,0,0,0.5);
+  border-radius: 8px;
+  padding: 15px;
+  backdrop-filter: blur(5px);
+  /* ★幅を350pxに変更 */
+  width: 350px;
+  z-index: 10000;
+  overflow-y: auto;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+}
+.float-window *, .float-window *::before, .float-window *::after {
+  box-sizing: border-box;
+}
+.float-info {
+  font-size: 14px;
+  margin-bottom: 15px;
+  white-space: nowrap;
+}
+.button-row {
+  display: flex;
+  width: 100%;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+.button-container {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+/* --- ★ボタンのデザインを013.cssに準拠 --- */
+.fw-button {
+  background: #eee;
+  position: relative;
+  display: flex;
+  justify-content: center; /* 中央揃えに変更 */
+  align-items: center;
+  padding: 10px 25px;
+  color: #313131;
+  transition: color 0.3s ease-in-out;
+  font-weight: 500;
+  z-index: 0;
+  /* ★左端のボーダーを追加 */
+  border: none;
+  border-left: 5px solid var(--button-hover-color);
+  cursor: pointer;
+  overflow: hidden; /* スライダーエフェクトのため */
+}
+
+/* ホバーエフェクト用のスライダー */
+.fw-button::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 100%;
+  background: var(--button-hover-color); /* JavaScriptから色を受け取る */
+  transition: .3s;
+  z-index: -1;
+}
+
+/* ホバー時のスタイル */
+.fw-button:hover {
+    color: #FFF;
+}
+
+.fw-button:hover:before {
+    width: 100%;
+}
+
+/* クリック（アクティブ）時のスタイル */
+.fw-button:active {
+    filter: brightness(0.9);
+}
+
+/* 無効（処理中など）のスタイル */
+.fw-button:disabled {
+    color: #999;
+    background: #f5f5f5;
+    cursor: not-allowed;
+    filter: grayscale(1);
+    border-left-color: #ccc;
+}
+
+.fw-button:disabled:hover:before {
+    width: 0; /* 無効時はホバーエフェクトを無効化 */
+}
+
+.button-full-width {
+  width: 100%;
+}
+.button-half-width {
+  width: 45%;
+  font-size: 14px;
+}
