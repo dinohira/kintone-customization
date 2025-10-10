@@ -1,7 +1,7 @@
 /**
  * kintone カスタマイズ - 作業管理アプリ
  * @fileoverview 作業進捗管理と保管材管理のための拡張機能
- * @version 2.1.1
+ * @version 2.1.0
  */
 
 (function () {
@@ -74,7 +74,7 @@
     POLE: 'Lポール',
     ITEM_DIMENSIONS: '品名寸法',
     ESTIMATE_WORK_TYPE: '見積用作業種別',
-    REMAINING_DIMENSION_CALC: 'C残寸法', // チェックボックス（1項目のみ）
+    REMAINING_DIMENSION_CALC: 'C残寸法', // ← チェックボックス（配列）
     SPLIT_DELIVERY_1: 'C分納1',
     SPLIT_DELIVERY_2: 'C分納2',
     FULL_DELIVERY_FLAG: 'C完納',
@@ -107,8 +107,8 @@
     INTERRUPTED: '不適合・中断',
     TRANSFER_DONE: '明細転記済',
     STORAGE_IN_STOCK: '現在保管中',
-    STORAGE_ALL_USED: '全量作業済み'
-    // ※ C残寸法のチェック項目ラベルは使用せず、チェックボックスの on/off で判定します
+    STORAGE_ALL_USED: '全量作業済み',
+    ALL_MATERIAL_USED: '素材全量使用済・残寸法ゼロ' // ← C残寸法（チェックボックス）に含まれるラベル
   });
 
   /**
@@ -346,6 +346,7 @@
       const rec = eventObj?.record || {};
       for (const [fieldCode, value] of Object.entries(updates)) {
         if (rec[fieldCode]) {
+          // オプション無しの validate は実質 no-op だったため、ここでは形式チェックを省略
           rec[fieldCode].value = value;
         }
       }
@@ -444,9 +445,9 @@
         updateRec[FIELDS.DEST_STORAGE_TYPE] = { value: '(大同)スタート板専用ポール' };
       }
 
-      // C残寸法（チェックボックス）: 1項目のみ → on/off は配列の長さで判定
+      // C残寸法（チェックボックス）に「素材全量使用済・残寸法ゼロ」が含まれているかで判定
       const zansuSelections = rec?.[FIELDS.REMAINING_DIMENSION_CALC]?.value;
-      const isZansuZero = Array.isArray(zansuSelections) && zansuSelections.length > 0;
+      const isZansuZero = safeIncludes(zansuSelections, STATUSES.ALL_MATERIAL_USED);
 
       let recordId;
       const updateBody = { app: DEST_APP_ID, record: updateRec };
