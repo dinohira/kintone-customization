@@ -643,31 +643,45 @@
        * @param {string} nextStatus - 次のステータス
        */
       const createStatusUpdateAction = (nextStatus) => async (e) => {
-        // ボタンを無効化して二重クリックを防止
         e.target.disabled = true;
+        Swal.fire({
+          title: '処理中...',
+          text: 'ステータスを更新しています。',
+          allowOutsideClick: false,
+          didOpen: () => Swal.showLoading()
+        });
 
         try {
-          // 1. 画面上のレコードオブジェクトを取得
-          const eventObj = kintone.app.record.get();
-          const currentRecordData = eventObj.record;
-
-          // 2. 画面上のレコードの値を変更
-          currentRecordData[FIELDS.STATUS].value = nextStatus;
+          const currentRecordData = kintone.app.record.get().record;
+          const updates = { [FIELDS.STATUS]: { value: nextStatus } };
 
           if (nextStatus === STATUSES.INTERRUPTED) {
-            currentRecordData[FIELDS.INTERRUPT_RETURN_STATUS].value = status;
+            updates[FIELDS.INTERRUPT_RETURN_STATUS] = { value: status };
           }
           if (status === STATUSES.WORK_DONE_CHECK_WAIT) {
-            currentRecordData[FIELDS.CHECK_DATE].value = getTodayString();
+            updates[FIELDS.CHECK_DATE] = { value: getTodayString() };
           }
           if (status === STATUSES.CHECK_DONE_SHIP_WAIT) {
-            currentRecordData[FIELDS.DELIVERY_DATE].value = getTodayString();
+            updates[FIELDS.DELIVERY_DATE] = { value: getTodayString() };
           }
 
-          // 3. 変更を画面にセット
-          kintone.app.record.set(eventObj);
-          // 4. kintone標準の保存ボタンをクリックして、保存処理をkintoneに委ねる
-          clickSaveButton();
+          await callKintoneApi(() => kintone.api(kintone.api.url('/k/v1/record', true), 'PUT', {
+            app: kintone.app.getId(),
+            id: kintone.app.record.getId(),
+            record: updates
+          }));
+
+          await Swal.fire({
+            icon: 'success',
+            title: '更新しました',
+            timer: 1500,
+            showConfirmButton: false
+          });
+
+          // ページを離れる際の確認ダイアログを無効化し、詳細画面へ強制的に遷移する
+          window.onbeforeunload = null;
+          const detailUrl = `/k/${kintone.app.getId()}/show#record=${kintone.app.record.getId()}`;
+          window.location.href = detailUrl;
 
         } catch (error) {
           handleError(error, ERROR_TYPES.API_ERROR, 'StatusUpdate');
