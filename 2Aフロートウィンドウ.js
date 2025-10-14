@@ -685,9 +685,11 @@
             timer: 1500,
             showConfirmButton: false
           });
-          // 警告ダイアログを回避するため、キャンセルボタンをクリックして詳細画面に戻る
-          // これにより、画面が自動でリロードされ、更新が反映される
-          clickCancelButton();
+
+          // ページを離れる際の確認ダイアログを無効化し、詳細画面へ強制的に遷移する
+          window.onbeforeunload = null;
+          const detailUrl = `/k/${kintone.app.getId()}/show#record=${kintone.app.record.getId()}`;
+          window.location.href = detailUrl;
 
         } catch (error) {
           handleError(error, ERROR_TYPES.API_ERROR, 'StatusUpdate');
