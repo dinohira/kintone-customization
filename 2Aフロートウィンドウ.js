@@ -6,7 +6,7 @@
  * 以下のURLをこのファイルより「先」に追加してください。
  * https://cdn.jsdelivr.net/npm/sweetalert2@11
  * @fileoverview 作業進捗管理と保管材管理のための拡張機能
- * @version 2.1.1
+ * @version 2.1.3
  */
 
 (function () {
@@ -374,6 +374,7 @@
    * ★ トップレベル：ステータス更新アクション（共通ロジック）
    * @param {string} nextStatus
    * @param {string} [currentStatus] - 現在のステータス（省略時はレコードから取得）
+   * ※ 保存後遷移は kintone標準に任せる（強制遷移しない）
    */
   const createStatusUpdateAction = (nextStatus, currentStatus) => async (e) => {
     e.target.disabled = true;
@@ -419,9 +420,7 @@
         showConfirmButton: false
       });
 
-      // ページを離れる際の確認ダイアログを無効化し、詳細画面へ遷移
-      window.onbeforeunload = null;
-      window.location.href = `/k/${appId}/show#record=${recordId}`;
+      // ★ 強制遷移は削除 → kintone標準の保存後挙動に任せる
     } catch (error) {
       handleError(error, ERROR_TYPES.API_ERROR, 'StatusUpdate');
       e.target.disabled = false;
@@ -837,7 +836,7 @@
         'white',
         (e) => {
           e.target.disabled = true;
-          clickSaveButton();
+          clickSaveButton(); // ← 標準の保存ボタンを押す（標準遷移に任せる）
         },
         '#ff9b67'
       );
@@ -901,7 +900,7 @@
         const rec = kintone.app.record.get().record;
         const url = await getStorageAppUrl(rec);
         if (url) {
-          window.location.href = url;
+          window.location.href = url; // ← 別アプリへ明示遷移（仕様維持）
         }
       });
 
@@ -996,6 +995,7 @@
     `app.record.edit.change.${FIELDS.FULL_DELIVERY_FLAG}`,
     `app.record.edit.change.${FIELDS.TOTAL_QUANTITY}`
   ];
+
   kintone.events.on(eventsToShow, showFloatWindow);
 
   // 分納テーブル制御のイベント
@@ -1004,6 +1004,7 @@
     'app.record.create.show',
     `app.record.edit.change.${FIELDS.SPLIT_DELIVERY_TABLE}`
   ];
+
   kintone.events.on(tableEvents, disableBunnoTableRows);
 
   // 詳細画面表示時の画面遷移制御
@@ -1026,4 +1027,3 @@
       handleError(error, ERROR_TYPES.UNKNOWN_ERROR, 'DOMContentLoaded');
     }
   });
-})();
