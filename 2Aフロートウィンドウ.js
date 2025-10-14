@@ -6,7 +6,7 @@
  * 以下のURLをこのファイルより「先」に追加してください。
  * https://cdn.jsdelivr.net/npm/sweetalert2@11
  * @fileoverview 作業進捗管理と保管材管理のための拡張機能
- * @version 2.1.3
+ * @version 2.1.4
  */
 
 (function () {
@@ -420,7 +420,8 @@
         showConfirmButton: false
       });
 
-      // ★ 強制遷移は削除 → kintone標準の保存後挙動に任せる
+      // APIで直接レコードを更新したため、画面の表示を最新の状態に更新する
+      location.reload();
     } catch (error) {
       handleError(error, ERROR_TYPES.API_ERROR, 'StatusUpdate');
       e.target.disabled = false;
