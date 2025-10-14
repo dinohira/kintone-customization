@@ -43,6 +43,17 @@
     };
 
     /**
+     * kintone APIを呼び出すラッパー関数
+     * @param {string} path - APIパス (例: '/k/v1/record')
+     * @param {string} method - HTTPメソッド ('GET', 'POST', 'PUT')
+     * @param {object} params - APIに渡すパラメータ
+     * @returns {Promise<object>} APIのレスポンス
+     */
+    const kintoneApi = (path, method, params) => {
+        return kintone.api(kintone.api.url(path, true), method, params);
+    };
+
+    /**
      * レコードのステータスを更新します。
      * @param {string|number} recordId - レコードID
      * @param {string} newStatus - 新しいステータス
@@ -50,7 +61,7 @@
      */
     const updateRecordStatus = (recordId, newStatus) => {
         return kintone.api(kintone.api.url('/k/v1/record', true), 'PUT', {
-            app: CONFIG.SOURCE_APP_ID,
+            app: kintone.app.getId(), // 自アプリのIDを動的に取得
             id: recordId,
             record: {
                 [CONFIG.FIELDS.STATUS]: { value: newStatus }
@@ -75,54 +86,51 @@
 
         try {
             const query = `${CONFIG.FIELDS.ESTIMATE_ID} = "${estimateID}"`;
-            const getRes = await kintone.api(kintone.api.url('/k/v1/records', true), 'GET', {
+            const getRes = await kintoneApi('/k/v1/records', 'GET', {
                 app: CONFIG.TARGET_APP_ID,
                 query: query
             });
 
-            const recordToUpsert = {};
-            CONFIG.FIELDS_TO_COPY.forEach(fieldCode => {
-                if (sourceRecord[fieldCode]?.value != null) {
-                    if (CONFIG.DATE_FIELDS_TO_FORMAT.includes(fieldCode)) {
-                        const dateValue = sourceRecord[fieldCode].value;
-                        if (dateValue) {
-                           recordToUpsert[fieldCode] = {
-                               value: dateValue.split('T')[0]
-                           };
-                        }
-                    } else {
-                        recordToUpsert[fieldCode] = sourceRecord[fieldCode];
-                    }
+            const recordToUpsert = CONFIG.FIELDS_TO_COPY.reduce((acc, fieldCode) => {
+                const field = sourceRecord[fieldCode];
+                if (field?.value != null) {
+                    const isDateField = CONFIG.DATE_FIELDS_TO_FORMAT.includes(fieldCode);
+                    acc[fieldCode] = {
+                        value: isDateField ? field.value.split('T')[0] : field.value
+                    };
                 }
-            });
+                return acc;
+            }, {});
 
             let targetRecordId;
+            let apiMethod, apiParams;
+
             if (getRes.records.length > 0) {
+                // 更新処理
                 targetRecordId = getRes.records[0].$id.value;
-                await kintone.api(kintone.api.url('/k/v1/record', true), 'PUT', {
-                    app: CONFIG.TARGET_APP_ID,
-                    id: targetRecordId,
-                    record: recordToUpsert
-                });
+                apiMethod = 'PUT';
+                apiParams = { app: CONFIG.TARGET_APP_ID, id: targetRecordId, record: recordToUpsert };
             } else {
-                const postRes = await kintone.api(kintone.api.url('/k/v1/record', true), 'POST', {
-                    app: CONFIG.TARGET_APP_ID,
-                    record: recordToUpsert
-                });
-                targetRecordId = postRes.id;
+                // 新規作成処理
+                apiMethod = 'POST';
+                apiParams = { app: CONFIG.TARGET_APP_ID, record: recordToUpsert };
             }
+
+            const upsertRes = await kintoneApi('/k/v1/record', apiMethod, apiParams);
+            targetRecordId = targetRecordId || upsertRes.id;
 
             if (targetRecordId) {
                 window.open(`/k/${CONFIG.TARGET_APP_ID}/show#record=${targetRecordId}`, '_blank');
             }
         } catch (error) {
-            const errorDetails = JSON.stringify(error.errors, null, 2);
-            console.error('レコードコピーエラー詳細:', errorDetails);
-            Swal.fire({
+            const errorDetails = JSON.stringify(error.errors || error.message, null, 2);
+            console.error('レコードコピーエラー詳細:', error);
+            await Swal.fire({
                 icon: 'error',
                 title: 'レコードコピー失敗',
-                html: `レコードのコピーに失敗しました。<br>詳細はコンソールを確認してください。<pre style="text-align: left; background-color: #f3f3f3; padding: 1em;">${errorDetails}</pre>`,
+                html: `レコードのコピーに失敗しました。<br>詳細はコンソールを確認してください。<pre style="text-align: left; background-color: #f3f3f3; padding: 1em; white-space: pre-wrap; word-break: break-all;">${errorDetails}</pre>`,
             });
+            throw error; // エラーを再スローして呼び出し元に伝える
         }
     };
 
@@ -166,42 +174,39 @@
 
         // --- クリックイベント設定 ---
         const handleProcess = async (getNewStatusFunc, shouldCopy) => {
+            buttonSubmit.disabled = true;
+            buttonReject.disabled = true;
+
+            Swal.fire({
+                title: '処理中...',
+                text: 'ステータスを更新しています。',
+                allowOutsideClick: false,
+                didOpen: () => Swal.showLoading()
+            });
+
             try {
-                buttonSubmit.disabled = true;
-                buttonReject.disabled = true;
-
-                Swal.fire({
-                    title: '処理中...',
-                    text: 'ステータスを更新しています。',
-                    allowOutsideClick: false,
-                    didOpen: () => {
-                        Swal.showLoading();
-                    }
-                });
-
                 const newStatus = getNewStatusFunc(currentStatus);
                 await updateRecordStatus(event.recordId, newStatus);
 
                 if (shouldCopy && newStatus === CONFIG.STATUS.ACCEPTED) {
                     await copyRecordToTargetApp(record);
                 }
-
-                // ★修正1: 更新成功後にメッセージを表示し、ページをリロード
-                Swal.fire({
+                
+                await Swal.fire({
                     icon: 'success',
                     title: '更新しました',
                     timer: 1500,
                     showConfirmButton: false
-                }).then(() => {
-                    location.reload();
                 });
+                location.reload();
 
             } catch (error) {
                 console.error('処理中にエラーが発生しました:', error);
                 Swal.fire({
                     icon: 'error',
                     title: '処理エラー',
-                    text: 'エラーが発生しました。詳細はコンソールを確認してください。'
+                    text: 'エラーが発生しました。詳細はコンソールを確認してください。',
+                    confirmButtonColor: '#3498db'
                 });
                 buttonSubmit.disabled = false;
                 buttonReject.disabled = false;
@@ -234,4 +239,3 @@
         return event;
     });
 })();
-
