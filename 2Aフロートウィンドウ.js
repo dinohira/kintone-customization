@@ -6,7 +6,7 @@
  * 以下のURLをこのファイルより「先」に追加してください。
  * https://cdn.jsdelivr.net/npm/sweetalert2@11
  * @fileoverview 作業進捗管理と保管材管理のための拡張機能
- * @version 2.1.4
+ * @version 2.1.3
  */
 
 (function () {
