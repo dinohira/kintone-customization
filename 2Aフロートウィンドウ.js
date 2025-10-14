@@ -327,6 +327,26 @@
     return false;
   };
 
+  /**
+   * kintoneのキャンセルボタンをクリックする（複数セレクタに対応）
+   * @returns {boolean} クリックできたか
+   */
+  const clickCancelButton = () => {
+    const selectors = [
+      '.gaia-ui-actionmenu-cancel',
+      '[data-gaia-automation-id="record-cancel-button"]'
+    ];
+    for (const sel of selectors) {
+      const el = document.querySelector(sel);
+      if (el) {
+        el.click();
+        return true;
+      }
+    }
+    logError(new Error('Cancel button not found'), ERROR_TYPES.UNKNOWN_ERROR, 'clickCancelButton');
+    return false;
+  };
+
   // =================================================================
   // APIラッパー関数
   // =================================================================
@@ -665,9 +685,9 @@
             timer: 1500,
             showConfirmButton: false
           });
-          // ページを離れる際の確認ダイアログを一時的に無効化
-          window.onbeforeunload = null;
-          location.reload();
+          // 警告ダイアログを回避するため、キャンセルボタンをクリックして詳細画面に戻る
+          // これにより、画面が自動でリロードされ、更新が反映される
+          clickCancelButton();
 
         } catch (error) {
           handleError(error, ERROR_TYPES.API_ERROR, 'StatusUpdate');
