@@ -665,6 +665,8 @@
             timer: 1500,
             showConfirmButton: false
           });
+          // ページを離れる際の確認ダイアログを一時的に無効化
+          window.onbeforeunload = null;
           location.reload();
 
         } catch (error) {
