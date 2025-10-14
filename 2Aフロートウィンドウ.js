@@ -1,12 +1,7 @@
 /**
  * kintone カスタマイズ - 作業管理アプリ
- *
- * このカスタマイズではSweetAlert2ライブラリを使用します。
- * kintoneの「JavaScript / CSSでカスタマイズ」設定で、
- * 以下のURLをこのファイルより「先」に追加してください。
- * https://cdn.jsdelivr.net/npm/sweetalert2@11
  * @fileoverview 作業進捗管理と保管材管理のための拡張機能
- * @version 2.1.5
+ * @version 2.1.1
  */
 
 (function () {
@@ -79,10 +74,10 @@
     POLE: 'Lポール',
     ITEM_DIMENSIONS: '品名寸法',
     ESTIMATE_WORK_TYPE: '見積用作業種別',
-    REMAINING_DIMENSION_CALC: 'C残寸法', // ← チェックボックス（配列）
+    REMAINING_DIMENSION_CALC: 'C残寸法', // チェックボックス（1項目のみ）
     SPLIT_DELIVERY_1: 'C分納1',
     SPLIT_DELIVERY_2: 'C分納2',
-    FULL_DELIVERY_FLAG: 'C完納', // チェックボックス（配列）：'一時作業停止し保管材へ'
+    FULL_DELIVERY_FLAG: 'C完納',
     TOTAL_QUANTITY: '総計上数量',
     INTERRUPT_RETURN_STATUS: 'F中断復帰',
     CHECK_DATE: 'チェック日',
@@ -112,8 +107,8 @@
     INTERRUPTED: '不適合・中断',
     TRANSFER_DONE: '明細転記済',
     STORAGE_IN_STOCK: '現在保管中',
-    STORAGE_ALL_USED: '全量作業済み',
-    ALL_MATERIAL_USED: '素材全量使用済・残寸法ゼロ' // ← C残寸法（チェックボックス）に含まれるラベル
+    STORAGE_ALL_USED: '全量作業済み'
+    // ※ C残寸法のチェック項目ラベルは使用せず、チェックボックスの on/off で判定します
   });
 
   /**
@@ -189,7 +184,7 @@
   };
 
   /**
-   * エラーログを記録し、ユーザに通知する（XSS対策で text を使用）
+   * エラーログを記録し、ユーザに通知する（アラート）
    */
   const handleError = (error, type, context) => {
     logError(error, type, context);
@@ -203,11 +198,7 @@
     };
 
     const userMessage = userMessages[type] || userMessages[ERROR_TYPES.UNKNOWN_ERROR];
-    Swal.fire({
-      icon: 'error',
-      title: userMessage,
-      text: `詳細: ${error?.message || '予期せぬエラー'}`
-    });
+    alert(`${userMessage}\n詳細: ${error?.message || '予期せぬエラーが発生しました'}`);
   };
 
   // =================================================================
@@ -234,7 +225,7 @@
   };
 
   /**
-   * 文字列/配列/未定義に安全な includes（部分一致）
+   * 文字列/配列/未定義に安全な includes
    */
   const safeIncludes = (v, needle) => {
     if (v == null) return false;
@@ -244,11 +235,6 @@
       return false;
     }
   };
-
-  /**
-   * チェックボックス（配列）にラベルが含まれるか（完全一致）
-   */
-  const checkboxIncludes = (values, label) => Array.isArray(values) && values.includes(label);
 
   /**
    * 16進数カラーコードを明るくする（入力不正時は #cccccc を返す）
@@ -331,26 +317,6 @@
     return false;
   };
 
-  /**
-   * kintoneのキャンセルボタンをクリックする（複数セレクタに対応）
-   * @returns {boolean} クリックできたか
-   */
-  const clickCancelButton = () => {
-    const selectors = [
-      '.gaia-ui-actionmenu-cancel',
-      '[data-gaia-automation-id="record-cancel-button"]'
-    ];
-    for (const sel of selectors) {
-      const el = document.querySelector(sel);
-      if (el) {
-        el.click();
-        return true;
-      }
-    }
-    logError(new Error('Cancel button not found'), ERROR_TYPES.UNKNOWN_ERROR, 'clickCancelButton');
-    return false;
-  };
-
   // =================================================================
   // APIラッパー関数
   // =================================================================
@@ -371,66 +337,31 @@
   };
 
   /**
-   * ★ トップレベル：ステータス更新アクション（共通ロジック）
-   * @param {string} nextStatus
-   * @param {string} [currentStatus] - 現在のステータス（省略時はレコードから取得）
-   * ※ 保存後遷移は kintone標準に任せる（強制遷移しない）
+   * レコードの値を更新して保存ボタンをクリックする
+   * @param {object} updates - {フィールドコード: 値} の形式のオブジェクト
    */
-  const createStatusUpdateAction = (nextStatus, currentStatus) => async (e) => {
-    e.target.disabled = true;
-    Swal.fire({
-      title: '処理中...',
-      text: 'ステータスを更新しています。',
-      allowOutsideClick: false,
-      didOpen: () => Swal.showLoading()
-    });
-
+  const updateRecordAndSave = (updates) => {
     try {
-      const appId = kintone.app.getId();
-      const recordId = kintone.app.record.getId();
-      const currentRecordData = kintone.app.record.get().record;
-
-      const prevStatus = currentStatus ?? currentRecordData?.[FIELDS.STATUS]?.value;
-      const updates = { [FIELDS.STATUS]: { value: nextStatus } };
-
-      // 中断へ遷移する場合、復帰用に元ステータスを保存
-      if (nextStatus === STATUSES.INTERRUPTED && prevStatus) {
-        updates[FIELDS.INTERRUPT_RETURN_STATUS] = { value: prevStatus };
+      const eventObj = kintone.app.record.get();
+      const rec = eventObj?.record || {};
+      for (const [fieldCode, value] of Object.entries(updates)) {
+        if (rec[fieldCode]) {
+          rec[fieldCode].value = value;
+        }
       }
-      // 前状態に応じた日付セット
-      if (prevStatus === STATUSES.WORK_DONE_CHECK_WAIT) {
-        updates[FIELDS.CHECK_DATE] = { value: getTodayString() };
-      }
-      if (prevStatus === STATUSES.CHECK_DONE_SHIP_WAIT) {
-        updates[FIELDS.DELIVERY_DATE] = { value: getTodayString() };
-      }
+      kintone.app.record.set(eventObj);
 
-      await callKintoneApi(() =>
-        kintone.api(kintone.api.url('/k/v1/record', true), 'PUT', {
-          app: appId,
-          id: recordId,
-          record: updates
-        })
-      );
+      // 保存後に編集モードでリロードするためのフラグをセット
+      sessionStorage.setItem('reloadToEditAfterSave', 'true');
 
-      await Swal.fire({
-        icon: 'success',
-        title: '更新しました',
-        timer: 1500,
-        showConfirmButton: false
-      });
-
-      // APIで直接レコードを更新したため、画面の表示を最新の状態に更新する
-      location.reload();
+      clickSaveButton();
     } catch (error) {
-      handleError(error, ERROR_TYPES.API_ERROR, 'StatusUpdate');
-      e.target.disabled = false;
+      handleError(error, ERROR_TYPES.VALIDATION_ERROR, 'RecordUpdate');
     }
   };
 
   /**
    * 保管材レコードのステータスを更新する（バックグラウンド処理）
-   * （未使用：必要になったら呼び出しを追加）
    */
   const updateStorageMaterialStatus = async (currentRecord) => {
     const managementNo = currentRecord?.[FIELDS.STORAGE_ID]?.value;
@@ -465,31 +396,18 @@
         kintone.api(kintone.api.url('/k/v1/record', true), 'PUT', updateBody)
       );
 
-      Swal.fire({
-        icon: 'info',
-        title: '保管材ステータス更新',
-        text: `保管材(管理番号: ${managementNo})のステータスを「${STATUSES.STORAGE_ALL_USED}」に更新しました。`
-      });
+      alert(`保管材(管理番号: ${managementNo})のステータスを「${STATUSES.STORAGE_ALL_USED}」に更新しました。`);
     } catch (error) {
       handleError(error, ERROR_TYPES.STORAGE_ERROR, 'StorageUpdate');
     }
   };
 
   /**
-   * ★ 追加：未定義値を送らないためのヘルパ
-   */
-  const setIfDefined = (obj, fieldCode, value) => {
-    if (value !== undefined && value !== null && value !== '') {
-      obj[fieldCode] = { value };
-    }
-  };
-
-  /**
    * 保管材登録アプリのレコードを更新し、画面遷移の準備をする
-   * @param {object} rec - 現在のレコードデータ
-   * @returns {Promise<string|null>} 成功した場合は遷移先URL、失敗した場合はnull
+   * @param {Object} rec - 現在のレコードデータ
+   * @returns {Promise<boolean>} 処理成功時はtrue
    */
-  const getStorageAppUrl = async (rec) => {
+  const prepareStorageAppTransition = async (rec) => {
     try {
       const managementNo = rec?.[FIELDS.STORAGE_ID]?.value;
       const taskId = rec?.[FIELDS.TASK_ID]?.value;
@@ -507,16 +425,17 @@
         })
       );
 
-      const updateRec = {};
-      setIfDefined(updateRec, FIELDS.STORAGE_ID, managementNo);
-      setIfDefined(updateRec, FIELDS.TASK_ID, taskId);
-      setIfDefined(updateRec, FIELDS.CUSTOMER_DETAIL_ID, rec?.[FIELDS.CUSTOMER_DETAIL_ID]?.value);
-      setIfDefined(updateRec, FIELDS.CARD_NO, rec?.[FIELDS.CARD_NO]?.value);
-      setIfDefined(updateRec, FIELDS.STEEL_TYPE, rec?.[FIELDS.STEEL_TYPE]?.value);
-      setIfDefined(updateRec, FIELDS.MELT_NO, rec?.[FIELDS.MELT_NO]?.value);
-      setIfDefined(updateRec, FIELDS.SCRAP_CLASS, rec?.[FIELDS.SCRAP_CLASS]?.value);
-      setIfDefined(updateRec, FIELDS.POLE, rec?.[FIELDS.POLE]?.value);
-      setIfDefined(updateRec, FIELDS.ITEM_DIMENSIONS, rec?.[FIELDS.ITEM_DIMENSIONS]?.value);
+      const updateRec = {
+        [FIELDS.STORAGE_ID]: { value: managementNo },
+        [FIELDS.TASK_ID]: { value: taskId },
+        [FIELDS.CUSTOMER_DETAIL_ID]: { value: rec?.[FIELDS.CUSTOMER_DETAIL_ID]?.value },
+        [FIELDS.CARD_NO]: { value: rec?.[FIELDS.CARD_NO]?.value },
+        [FIELDS.STEEL_TYPE]: { value: rec?.[FIELDS.STEEL_TYPE]?.value },
+        [FIELDS.MELT_NO]: { value: rec?.[FIELDS.MELT_NO]?.value },
+        [FIELDS.SCRAP_CLASS]: { value: rec?.[FIELDS.SCRAP_CLASS]?.value },
+        [FIELDS.POLE]: { value: rec?.[FIELDS.POLE]?.value },
+        [FIELDS.ITEM_DIMENSIONS]: { value: rec?.[FIELDS.ITEM_DIMENSIONS]?.value }
+      };
 
       const workType = rec?.[FIELDS.ESTIMATE_WORK_TYPE]?.value;
       if (workType === 'ビレット') {
@@ -525,9 +444,9 @@
         updateRec[FIELDS.DEST_STORAGE_TYPE] = { value: '(大同)スタート板専用ポール' };
       }
 
-      // C残寸法（チェックボックス）に「素材全量使用済・残寸法ゼロ」が含まれているかで判定
+      // C残寸法（チェックボックス）: 1項目のみ → on/off は配列の長さで判定
       const zansuSelections = rec?.[FIELDS.REMAINING_DIMENSION_CALC]?.value;
-      const isZansuZero = checkboxIncludes(zansuSelections, STATUSES.ALL_MATERIAL_USED);
+      const isZansuZero = Array.isArray(zansuSelections) && zansuSelections.length > 0;
 
       let recordId;
       const updateBody = { app: DEST_APP_ID, record: updateRec };
@@ -560,28 +479,24 @@
 
       if (recordId) {
         const url = `/k/${DEST_APP_ID}/show#record=${recordId}&mode=edit`;
-        return url;
+        sessionStorage.setItem('navigateToAfterSave', url);
+        return true;
       }
-      return null;
+      return false;
     } catch (error) {
       handleError(error, ERROR_TYPES.STORAGE_ERROR, 'StorageTransition');
-      return null;
+      return false;
     }
   };
 
   /**
    * 保管材入力のメッセージを表示し、画面遷移の準備をする
-   * @returns {Promise<string|null>} 遷移先URL（成功時）／null（失敗時）
+   * @returns {Promise<boolean>} 処理成功時はtrue
    */
   const promptAndPrepareStorageApp = async () => {
-    await Swal.fire({
-      icon: 'info',
-      title: '保管材入力',
-      text: '保管材の入力をしてください。'
-    });
+    alert('保管材の入力をしてください。');
     const record = kintone.app.record.get().record;
-    const url = await getStorageAppUrl(record);
-    return url;
+    return await prepareStorageAppTransition(record);
   };
 
   // =================================================================
@@ -598,25 +513,6 @@
     } catch (error) {
       handleError(error, ERROR_TYPES.UNKNOWN_ERROR, 'RemoveFloatWindow');
     }
-  };
-
-  /** （任意）簡易スタイルを1回だけ注入 */
-  const injectStyleOnce = () => {
-    if (document.getElementById('fw-style')) return;
-    const style = document.createElement('style');
-    style.id = 'fw-style';
-    style.textContent = `
-      .float-window { position: fixed; right: 16px; bottom: 16px; z-index: 9999;
-        background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 12px; box-shadow: 0 4px 16px rgba(0,0,0,.1); }
-      .button-container { display: grid; gap: 8px; }
-      .fw-button { padding: 10px 12px; border: none; border-radius: 6px; cursor: pointer;
-        background: var(--button-bg-color, #3498db); color: var(--button-text-color, #fff); }
-      .fw-button:hover { background: var(--button-hover-color, #5dade2); }
-      .button-full-width { width: 100%; }
-      .button-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-      .float-info .info-row { margin-bottom: 4px; }
-    `;
-    document.head.appendChild(style);
   };
 
   // =================================================================
@@ -726,75 +622,92 @@
       const isBunno =
         safeIncludes(record?.[FIELDS.SPLIT_DELIVERY_1]?.value, KEYWORDS.BUNNO) ||
         safeIncludes(record?.[FIELDS.SPLIT_DELIVERY_2]?.value, KEYWORDS.BUNNO);
-
-      // C完納（チェックボックス）に「一時作業停止し保管材へ」が含まれるか
-      const isStopAndStorage = checkboxIncludes(
-        record?.[FIELDS.FULL_DELIVERY_FLAG]?.value,
-        KEYWORDS.STOP_AND_STORAGE
-      );
-
+      const isKan = safeIncludes(record?.[FIELDS.FULL_DELIVERY_FLAG]?.value, KEYWORDS.STOP_AND_STORAGE);
       const soukeijouSuuryou = record?.[FIELDS.TOTAL_QUANTITY]?.value;
+
+      const createStatusUpdateAction = (nextStatus) => async () => {
+        const currentRecordData = kintone.app.record.get().record;
+        const updates = { [FIELDS.STATUS]: nextStatus };
+
+        if (nextStatus === STATUSES.INTERRUPTED) {
+          updates[FIELDS.INTERRUPT_RETURN_STATUS] = status;
+        }
+        if (status === STATUSES.WORK_DONE_CHECK_WAIT) {
+          updates[FIELDS.CHECK_DATE] = getTodayString();
+        }
+        if (status === STATUSES.CHECK_DONE_SHIP_WAIT) {
+          updates[FIELDS.DELIVERY_DATE] = getTodayString();
+        }
+
+        const isTargetStatus =
+          currentRecordData?.[FIELDS.STATUS]?.value === STATUSES.CHECK_DONE_SHIP_WAIT;
+        const isSazaiSka = currentRecordData?.[FIELDS.REMAINING_MATERIAL]?.value === KEYWORDS.S_KA;
+        const isFromStorage = safeIncludes(
+          currentRecordData?.[FIELDS.WORK_INFO_2]?.value,
+          KEYWORDS.FROM_STORAGE
+        );
+
+        if (isTargetStatus && isSazaiSka && isFromStorage) {
+          updateStorageMaterialStatus(currentRecordData);
+        }
+
+        updateRecordAndSave(updates);
+      };
 
       if (status === STATUSES.WORKING) {
         if (external === OUTSOURCE_TYPES.NONE) {
           if (isBunno) {
-            if (!isStopAndStorage) {
-              return {
-                caption: '作業中断',
-                onClick: createStatusUpdateAction(STATUSES.INTERRUPTED, status)
-              };
+            if (!isKan) {
+              return { caption: '作業中断', onClick: createStatusUpdateAction(STATUSES.INTERRUPTED) };
             } else {
               if (soukeijouSuuryou && Number.parseFloat(soukeijouSuuryou) !== 0) {
                 return {
                   caption: '全ストップ・計上要求',
-                  onClick: async (e) => {
-                    await Swal.fire({
-                      icon: 'warning',
-                      title: '確認',
-                      text: '総計上数量が0になるようにしてください。作業を中断します。'
+                  onClick: () => {
+                    alert('総計上数量が0になるようにしてください。作業を中断します。');
+                    updateRecordAndSave({
+                      [FIELDS.STATUS]: STATUSES.INTERRUPTED,
+                      [FIELDS.INTERRUPT_RETURN_STATUS]: status
                     });
-                    createStatusUpdateAction(STATUSES.INTERRUPTED, status)(e);
                   }
                 };
               } else {
-                // 計上0なら「明細転記済」に整合
-                const caption = '明細転記済に更新';
+                const [caption] = processRoutes[external][status];
                 const onClick =
                   zanasi === KEYWORDS.STORAGE
-                    ? async (e) => {
-                        // 先に更新 → その後、保管材へ誘導
-                        await createStatusUpdateAction(STATUSES.TRANSFER_DONE, status)(e);
-                        const url = await promptAndPrepareStorageApp();
-                        if (url) window.location.href = url;
+                    ? async () => {
+                        const success = await promptAndPrepareStorageApp();
+                        if (success) {
+                          const today = getTodayString();
+                          updateRecordAndSave({
+                            [FIELDS.STATUS]: STATUSES.TRANSFER_DONE,
+                            [FIELDS.CHECK_DATE]: today,
+                            [FIELDS.DELIVERY_DATE]: today
+                          });
+                        }
                       }
-                    : createStatusUpdateAction(STATUSES.TRANSFER_DONE, status);
+                    : createStatusUpdateAction(STATUSES.TRANSFER_DONE);
                 return { caption, onClick };
               }
             }
           }
         }
-        // 残材が保管の場合の一般ルート（更新後に保管誘導）
         if (zanasi === KEYWORDS.STORAGE) {
-          const route = processRoutes[external]?.[status];
-          if (route) {
-            const [caption, nextStatus] = route;
-            return {
-              caption,
-              onClick: async (e) => {
-                await createStatusUpdateAction(nextStatus, status)(e);
-                const url = await promptAndPrepareStorageApp();
-                if (url) window.location.href = url;
-              }
-            };
-          }
+          const [caption, nextStatus] = processRoutes[external][status];
+          return {
+            caption,
+            onClick: async () => {
+              const success = await promptAndPrepareStorageApp();
+              if (success) updateRecordAndSave({ [FIELDS.STATUS]: nextStatus });
+            }
+          };
         }
       }
 
-      // 一般ルート
       const route = processRoutes[external]?.[status];
       if (route) {
         const [caption, nextStatus] = route;
-        return { caption, onClick: createStatusUpdateAction(nextStatus, status) };
+        return { caption, onClick: createStatusUpdateAction(nextStatus) };
       }
 
       return null;
@@ -831,18 +744,9 @@
       const rowDiv = document.createElement('div');
       rowDiv.classList.add('button-row');
 
-      const saveBtn = createButton(
-        '一時保存',
-        '#DB7734',
-        'white',
-        (e) => {
-          e.target.disabled = true;
-          clickSaveButton(); // ← 標準の保存ボタンを押す（標準遷移に任せる）
-        },
-        '#ff9b67'
-      );
-
+      const saveBtn = createButton('一時保存', '#DB7734', 'white', clickSaveButton, '#ff9b67');
       if (saveBtn) {
+        saveBtn.classList.add('button-half-width');
         rowDiv.appendChild(saveBtn);
       }
 
@@ -852,20 +756,22 @@
         interruptLabel,
         '#DB3498',
         'white',
-        async (e) => {
+        () => {
           const currentRecord = kintone.app.record.get().record;
-          let nextStatus;
+          const updates = {};
           if (isInterrupted) {
-            nextStatus = currentRecord?.[FIELDS.INTERRUPT_RETURN_STATUS]?.value;
+            updates[FIELDS.STATUS] = currentRecord?.[FIELDS.INTERRUPT_RETURN_STATUS]?.value;
           } else {
-            nextStatus = STATUSES.INTERRUPTED;
+            updates[FIELDS.INTERRUPT_RETURN_STATUS] = currentRecord?.[FIELDS.STATUS]?.value;
+            updates[FIELDS.STATUS] = STATUSES.INTERRUPTED;
           }
-          await createStatusUpdateAction(nextStatus, record?.[FIELDS.STATUS]?.value)(e);
+          updateRecordAndSave(updates);
         },
         '#ff67cb'
       );
 
       if (interruptBtn) {
+        interruptBtn.classList.add('button-half-width');
         rowDiv.appendChild(interruptBtn);
       }
 
@@ -896,12 +802,10 @@
         return null;
       }
 
-      const btn = createButton('保管材登録', '#97DB34', 'black', async (e) => {
-        e.target.disabled = true;
+      const btn = createButton('保管材登録', '#97DB34', 'black', async () => {
         const rec = kintone.app.record.get().record;
-        const url = await getStorageAppUrl(rec);
-        if (url) {
-          window.location.href = url; // ← 別アプリへ明示遷移（仕様維持）
+        if (await prepareStorageAppTransition(rec)) {
+          clickSaveButton();
         }
       });
 
@@ -924,9 +828,6 @@
     try {
       const record = event?.record || kintone.app.record.get().record;
       validateValue(record, 'レコード', { required: true });
-
-      // （任意）スタイル注入
-      injectStyleOnce();
 
       removeFloatWindow();
 
@@ -958,7 +859,6 @@
 
   /**
    * 分納記録テーブルの行を編集不可にする
-   * （edit/create イベントで有効。detail では無効）
    */
   const disableBunnoTableRows = (event) => {
     try {
@@ -1011,7 +911,27 @@
   // 詳細画面表示時の画面遷移制御
   kintone.events.on('app.record.detail.show', (event) => {
     try {
-      // 詳細画面では常にフローティングウィンドウを削除
+      // 優先度1: 他アプリ（保管材アプリ）への遷移
+      const pendingUrl = sessionStorage.getItem('navigateToAfterSave');
+      if (pendingUrl) {
+        sessionStorage.removeItem('navigateToAfterSave');
+        window.location.href = pendingUrl;
+        return event;
+      }
+
+      // 優先度2: 現在のレコードを編集モードでリロード
+      const shouldReloadToEdit = sessionStorage.getItem('reloadToEditAfterSave');
+      if (shouldReloadToEdit) {
+        sessionStorage.removeItem('reloadToEditAfterSave');
+        const recordId = event.recordId;
+        const appId = kintone.app.getId();
+        if (recordId && appId) {
+          window.location.href = `/k/${appId}/show#record=${recordId}&mode=edit`;
+        }
+        return event;
+      }
+
+      // 上記に該当しない場合は、フローティングウィンドウを消すだけ
       removeFloatWindow();
       return event;
     } catch (error) {
