@@ -1051,3 +1051,5 @@
       handleError(error, ERROR_TYPES.UNKNOWN_ERROR, 'DOMContentLoaded');
     }
   });
+  
+})();
