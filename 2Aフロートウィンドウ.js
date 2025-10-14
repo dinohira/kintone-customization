@@ -48,9 +48,6 @@
     DEBUG_MODE: false
   });
 
-  /** バージョン定義（ヘッダの@versionと同期） */
-  const FW_VERSION = '2.1.3';
-
   /** アプリケーションID */
   const DEST_APP_ID = 240; // 保管材アプリID
 
@@ -98,8 +95,7 @@
     // 保管材アプリのフィールド
     DEST_STORAGE_STATUS: 'R保管材ステータス',
     DEST_STORAGE_RECORD_TABLE: 'T保管素材記録',
-    DEST_STORAGE_TYPE: 'D保管材種別',
-    FW_VERSION: 'FWversion'
+    DEST_STORAGE_TYPE: 'D保管材種別'
   });
 
   /**
@@ -1002,26 +998,6 @@
 
   kintone.events.on(eventsToShow, showFloatWindow);
 
-  // バージョン反映
-  const setFWVersion = (event) => {
-    try {
-      if (event && event.record && event.record[FIELDS.FW_VERSION]) {
-        event.record[FIELDS.FW_VERSION].value = FW_VERSION;
-      }
-      return event;
-    } catch (error) {
-      handleError(error, ERROR_TYPES.UNKNOWN_ERROR, 'SetFWVersion');
-      return event;
-    }
-  };
-
-  kintone.events.on([
-    'app.record.create.show',
-    'app.record.edit.show',
-    'app.record.create.submit',
-    'app.record.edit.submit'
-  ], setFWVersion);
-
   // 分納テーブル制御のイベント
   const tableEvents = [
     'app.record.edit.show',
@@ -1051,5 +1027,4 @@
       handleError(error, ERROR_TYPES.UNKNOWN_ERROR, 'DOMContentLoaded');
     }
   });
-  
 })();
