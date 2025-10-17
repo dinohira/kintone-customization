@@ -104,3 +104,11 @@
   width: 45%;
   font-size: 14px;
 }
+
+/* --- Info-onlyモード: フロート内のボタンを非表示にする --- */
+.float-window .button-container,
+.float-window .fw-button,
+.float-window .button-full-width,
+.float-window .button-half-width {
+  display: none !important;
+}
