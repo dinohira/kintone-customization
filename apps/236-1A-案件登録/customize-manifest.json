@@ -1,0 +1,25 @@
+{
+    "app": "236",
+    "scope": "ALL",
+    "desktop": {
+        "js": [
+            "../../shared/js/cascade-engine.js",
+            "desktop/js/app236_cascade_config.js",
+            "desktop/js/1Aルックアップ自動取得.js",
+            "desktop/js/sagyoutouroku.js",
+            "desktop/js/ページ自動採番_0.js",
+            "desktop/js/DST鍛延火造判別_0.js",
+            "../../shared/js/trd-engine.js",
+            "desktop/js/app236_trd_config.js"
+        ],
+        "css": [
+            "desktop/css/lookup.css",
+            "desktop/css/013.css",
+            "desktop/css/51-modern-default.css"
+        ]
+    },
+    "mobile": {
+        "js": [],
+        "css": []
+    }
+}

@@ -1,0 +1,161 @@
+/* ===================================================
+   kintone 新アプリ(ID:225)用 テーブルレイアウトCSS
+   【統合版】T時間計算 & T面積計算
+   =================================================== */
+
+/*
+   PART 1: T時間計算テーブル (.subtable-8242560)
+*/
+
+/* テーブル全体の幅 */
+.subtable-8242560 {
+    width: 2000px !important;
+}
+/* ヘッダーを非表示 */
+.subtable-8242560 .subtable-header-gaia {
+    display: none !important;
+}
+/* 行の基本設定 */
+.subtable-8242560 tbody tr {
+    position: relative !important; /* オーバーレイ配置の基準点 */
+    display: flex !important;
+    flex-wrap: wrap !important;
+    align-items: flex-start !important;
+    border-bottom: 1px solid #e3e7e8 !important;
+    padding: 15px 100px 15px 100px !important;
+}
+
+/* 【最終解決策】偶数行に半透明のオーバーレイを重ねる */
+.subtable-8242560 tbody tr:nth-child(even)::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.03); /* 3%の黒色オーバーレイ */
+    pointer-events: none; /* オーバーレイがクリックの邪魔をしないようにする */
+}
+
+
+/* セルの基本設定 */
+.subtable-8242560 tbody tr > td {
+    border: none !important;
+    padding: 0 10px !important;
+    box-sizing: border-box !important;
+    margin-bottom: 15px !important;
+}
+
+/* "C計上1"(最初のセル)を左端に固定 */
+.subtable-8242560 tbody tr > td:nth-child(1) {
+    position: absolute !important; left: 0 !important; top: 0 !important;
+    width: 100px !important; height: 100% !important; margin: 0 !important; padding: 0 !important;
+    display: flex !important; align-items: center !important; justify-content: center !important;
+}
+/* 1段目のフィールド幅 */
+.subtable-8242560 tbody tr > td:nth-child(2) { width: 10% !important; } /* C文字列のみ1 */
+.subtable-8242560 tbody tr > td:nth-child(3) { width: 30% !important; } /* 文字列1 */
+.subtable-8242560 tbody tr > td:nth-child(4) { width: 30% !important; } /* R計算方式1 */
+.subtable-8242560 tbody tr > td:nth-child(5) { width: 20% !important; } /* L作業機械 */
+.subtable-8242560 tbody tr > td:nth-child(6) { width: 10% !important; } /* チャージ */
+/* 2段目の先頭で改行 */
+.subtable-8242560 tbody tr > td:nth-child(7)::before {
+    content: '' !important; flex-basis: 100% !important; width: 0 !important; height: 10px !important;
+}
+/* 2段目のフィールド幅 (11項目で均等割) */
+.subtable-8242560 tbody tr > td:nth-child(n+7):not(:last-child) {
+    width: 9% !important;
+}
+/* ラベルのスタイル */
+.subtable-8242560 tbody tr > td .control-gaia::before {
+    content: attr(data-label) !important; display: block !important;
+    font-size: 12px !important; color: #fff !important;
+    background-color: #3498db !important; margin-bottom: 6px !important;
+    padding: 5px !important; border-radius: 4px !important; text-align: center !important;
+}
+/* 行操作ボタン(最後のセル)を右端に固定 */
+.subtable-8242560 tbody tr > td:last-child {
+    position: absolute !important; right: 0 !important; top: 0 !important;
+    width: 100px !important; height: 100% !important; margin: 0 !important; padding: 0 !important;
+    display: flex !important; align-items: center !important; justify-content: center !important;
+}
+
+/* ====================================================================== */
+
+/*
+   PART 2: T面積計算テーブル (.subtable-8242561)
+*/
+
+/* テーブル全体の幅 */
+.subtable-8242561 {
+    width: 2000px !important;
+}
+/* ヘッダーを非表示 */
+.subtable-8242561 .subtable-header-gaia {
+    display: none !important;
+}
+/* 行の基本設定 */
+.subtable-8242561 tbody tr {
+    position: relative !important; /* オーバーレイ配置の基準点 */
+    display: flex !important;
+    flex-wrap: wrap !important;
+    align-items: flex-start !important;
+    border-bottom: 1px solid #e3e7e8 !important;
+    padding: 15px 100px 15px 100px !important;
+}
+
+/* 【最終解決策】偶数行に半透明のオーバーレイを重ねる */
+.subtable-8242561 tbody tr:nth-child(even)::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.05); /* 3%の黒色オーバーレイ */
+    pointer-events: none; /* オーバーレイがクリックの邪魔をしないようにする */
+}
+
+
+/* セルの基本設定 */
+.subtable-8242561 tbody tr > td {
+    border: none !important;
+    padding: 0 10px !important;
+    box-sizing: border-box !important;
+    margin-bottom: 15px !important;
+}
+
+/* "C計上2"(最初のセル)を左端に固定 */
+.subtable-8242561 tbody tr > td:nth-child(1) {
+    position: absolute !important; left: 0 !important; top: 0 !important;
+    width: 100px !important; height: 100% !important; margin: 0 !important; padding: 0 !important;
+    display: flex !important; align-items: center !important; justify-content: center !important;
+}
+/* 1段目のフィールド幅 */
+.subtable-8242561 tbody tr > td:nth-child(2) { width: 10% !important; } /* C文字列のみ2 */
+.subtable-8242561 tbody tr > td:nth-child(3) { width: 30% !important; } /* 文字列2 */
+.subtable-8242561 tbody tr > td:nth-child(4) { width: 30% !important; } /* R計算方式2 */
+.subtable-8242561 tbody tr > td:nth-child(5) { width: 20% !important; } /* L小分類 */
+.subtable-8242561 tbody tr > td:nth-child(6) { width: 10% !important; } /* 計算単価 */
+/* 2段目の先頭で改行 */
+.subtable-8242561 tbody tr > td:nth-child(7)::before {
+    content: '' !important; flex-basis: 100% !important; width: 0 !important; height: 10px !important;
+}
+/* 2段目のフィールド幅 (11項目で均等割) */
+.subtable-8242561 tbody tr > td:nth-child(n+7):not(:last-child) {
+    width: 9% !important;
+}
+/* ラベルのスタイル */
+.subtable-8242561 tbody tr > td .control-gaia::before {
+    content: attr(data-label) !important; display: block !important;
+    font-size: 12px !important; color: #fff !important;
+    background-color: #3498db !important; margin-bottom: 6px !important;
+    padding: 5px !important; border-radius: 4px !important; text-align: center !important;
+}
+/* 行操作ボタン(最後のセル)を右端に固定 */
+.subtable-8242561 tbody tr > td:last-child {
+    position: absolute !important; right: 0 !important; top: 0 !important;
+    width: 100px !important; height: 100% !important; margin: 0 !important; padding: 0 !important;
+    display: flex !important; align-items: center !important; justify-content: center !important;
+}
+

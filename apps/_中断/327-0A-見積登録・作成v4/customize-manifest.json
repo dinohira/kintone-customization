@@ -1,0 +1,14 @@
+{
+    "app": "327",
+    "scope": "ALL",
+    "desktop": {
+        "js": [
+            "desktop/js/material-selector.js"
+        ],
+        "css": []
+    },
+    "mobile": {
+        "js": [],
+        "css": []
+    }
+}

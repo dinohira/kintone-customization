@@ -1,0 +1,22 @@
+{
+    "app":  "195",
+    "scope":  "ALL",
+    "desktop":  {
+                    "js":  [
+                               "desktop/js/195_cascade_helper.js"
+                           ],
+                    "css":  [
+                                "desktop/css/013.css",
+                                "desktop/css/51-modern-default.css",
+                                "desktop/css/lookup.css"
+                            ]
+                },
+    "mobile":  {
+                   "js":  [
+
+                          ],
+                   "css":  [
+
+                           ]
+               }
+}

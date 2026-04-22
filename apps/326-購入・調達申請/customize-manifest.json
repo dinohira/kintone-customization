@@ -1,0 +1,23 @@
+{
+    "app":  "326",
+    "scope":  "ALL",
+    "desktop":  {
+                    "js":  [
+                               "desktop/js/手書き保存_アプリ326.js",
+                               "desktop/js/見積内容連動_アプリ326.js"
+                           ],
+                    "css":  [
+                                "desktop/css/013.css",
+                                "desktop/css/51-modern-default.css",
+                                "desktop/css/lookup.css"
+                            ]
+                },
+    "mobile":  {
+                   "js":  [
+
+                          ],
+                   "css":  [
+
+                           ]
+               }
+}

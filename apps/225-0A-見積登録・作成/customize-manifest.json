@@ -1,0 +1,30 @@
+{
+    "app":  "225",
+    "scope":  "ALL",
+    "desktop":  {
+                    "js":  [
+                               "https://cdn.jsdelivr.net/npm/sweetalert2@11",
+                               "desktop/js/統合版_アプリ225スクリプト.js",
+                               "desktop/js/app225_table_copy.js",
+                               "../../shared/js/cascade-engine.js",
+                               "desktop/js/app225_cascade_config.js",
+                               "../../shared/js/lkd-engine.js",
+                               "desktop/js/app225_lookup_dropdown.js"
+                           ],
+                    "css":  [
+                                "desktop/css/lookup.css",
+                                "desktop/css/013.css",
+                                "desktop/css/テーブル折り返しcss.css",
+                                "desktop/css/button-style.css",
+                                "desktop/css/51-modern-default.css"
+                            ]
+                },
+    "mobile":  {
+                   "js":  [
+
+                          ],
+                   "css":  [
+
+                           ]
+               }
+}

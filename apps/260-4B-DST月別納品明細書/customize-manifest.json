@@ -1,0 +1,22 @@
+{
+    "app":  "260",
+    "scope":  "ALL",
+    "desktop":  {
+                    "js":  [
+                               "desktop/js/CSVoutput_0.js"
+                           ],
+                    "css":  [
+                                "desktop/css/lookup.css",
+                                "desktop/css/013.css",
+                                "desktop/css/51-modern-default.css"
+                            ]
+                },
+    "mobile":  {
+                   "js":  [
+
+                          ],
+                   "css":  [
+
+                           ]
+               }
+}

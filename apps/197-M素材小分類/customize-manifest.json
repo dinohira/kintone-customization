@@ -1,0 +1,14 @@
+{
+    "app": "197",
+    "scope": "ALL",
+    "desktop": {
+        "js": [
+            "../../shared/js/lkd-engine.js"
+        ],
+        "css": []
+    },
+    "mobile": {
+        "js": [],
+        "css": []
+    }
+}

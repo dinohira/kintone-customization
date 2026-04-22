@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <base target="_top">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;500;700&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', 'Noto Sans JP', sans-serif;
+            background-color: #f4f6f9;
+            color: #2d3436;
+            padding: 20px;
+            margin: 0;
+        }
+        .form-container {
+            background: #ffffff;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+        }
+        .form-group {
+            margin-bottom: 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        .form-label {
+            font-size: 14px;
+            font-weight: 700;
+            color: #636e72;
+        }
+        .form-input {
+            padding: 10px;
+            border: 1px solid #dfe6e9;
+            border-radius: 8px;
+            font-size: 15px;
+            font-family: inherit;
+        }
+        .btn-row {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .btn-submit {
+            flex: 1;
+            background: #0984e3;
+            color: white;
+            border: none;
+            padding: 12px;
+            border-radius: 8px;
+            font-weight: 700;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        .btn-submit:hover {
+            background: #74b9ff;
+        }
+        .btn-close {
+            flex: 0 0 auto;
+            background: #b2bec3;
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-weight: 700;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        .btn-close:hover {
+            background: #636e72;
+        }
+        .message {
+            margin-top: 10px;
+            font-size: 14px;
+            font-weight: 500;
+            text-align: center;
+        }
+        .success { color: #00b894; }
+        .error { color: #d63031; }
+    </style>
+</head>
+<body>
+    <div class="form-container">
+        <div class="form-group">
+            <label class="form-label">従業員</label>
+            <select id="emp-select" class="form-input">
+                <option value="">読み込み中...</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label class="form-label">対象日</label>
+            <input type="date" id="log-date" class="form-input">
+        </div>
+        <div class="form-group">
+            <label class="form-label">時間</label>
+            <input type="time" id="log-time" class="form-input">
+        </div>
+        <div class="form-group">
+            <label class="form-label">打刻種別</label>
+            <select id="log-type" class="form-input">
+                <option value="出勤">出勤</option>
+                <option value="退勤">退勤</option>
+                <option value="出勤(遅刻)">出勤(遅刻)</option>
+                <option value="退勤(早退)">退勤(早退)</option>
+                <option value="外出">外出</option>
+                <option value="帰社">帰社</option>
+            </select>
+        </div>
+        <div class="btn-row">
+            <button class="btn-submit" id="submit-btn" onclick="submitLog()">追加する</button>
+            <button class="btn-close" onclick="google.script.host.close()">閉じる</button>
+        </div>
+        <div id="msg" class="message"></div>
+    </div>
+
+    <script>
+        // 現在日時をデフォルト設定する関数
+        function setDefaultDateTime() {
+            const now = new Date();
+            const yyyy = now.getFullYear();
+            const mm = String(now.getMonth() + 1).padStart(2, '0');
+            const dd = String(now.getDate()).padStart(2, '0');
+            const hh = String(now.getHours()).padStart(2, '0');
+            const min = String(now.getMinutes()).padStart(2, '0');
+            
+            document.getElementById('log-date').value = `${yyyy}-${mm}-${dd}`;
+            document.getElementById('log-time').value = `${hh}:${min}`;
+        }
+
+        // 初期化
+        setDefaultDateTime();
+
+        // 従業員リストを取得
+        google.script.run
+            .withSuccessHandler(function(list) {
+                const select = document.getElementById('emp-select');
+                select.innerHTML = '<option value="">-- 選択してください --</option>';
+                list.forEach(emp => {
+                    const option = document.createElement('option');
+                    // 値に「ID|名前」を持たせる
+                    option.value = emp.id + '|' + emp.name + '|' + emp.type;
+                    option.text = emp.name + (emp.id ? ` (${emp.id})` : '');
+                    select.appendChild(option);
+                });
+            })
+            .withFailureHandler(function(err) {
+                document.getElementById('emp-select').innerHTML = '<option value="">読込エラー</option>';
+            })
+            .getEmployeeListForDialog();
+
+        function submitLog() {
+            const empVal = document.getElementById('emp-select').value;
+            const dateStr = document.getElementById('log-date').value;
+            const timeStr = document.getElementById('log-time').value;
+            const type = document.getElementById('log-type').value;
+
+            if (!empVal || !dateStr || !timeStr || !type) {
+                showMessage('未入力の項目があります', false);
+                return;
+            }
+
+            const [empId, empName, empWorkType] = empVal.split('|');
+
+            const btn = document.getElementById('submit-btn');
+            btn.disabled = true;
+            btn.innerText = '送信中...';
+            showMessage('', true);
+
+            google.script.run
+                .withSuccessHandler(function(res) {
+                    console.log('addManualLog result:', JSON.stringify(res));
+                    btn.disabled = false;
+                    btn.innerText = '追加する';
+                    if (res && res.success) {
+                        showMessage('✅ 打刻ログを追加しました！続けて入力できます。', true);
+                    } else {
+                        const errMsg = (res && res.error) ? res.error : '不明なエラー（レスポンス: ' + JSON.stringify(res) + '）';
+                        showMessage('追加失敗: ' + errMsg, false);
+                    }
+                })
+                .withFailureHandler(function(err) {
+                    console.error('addManualLog failure:', err);
+                    btn.disabled = false;
+                    btn.innerText = '追加する';
+                    // GASのエラーオブジェクトからメッセージを取得
+                    const errMsg = (err && err.message) ? err.message : JSON.stringify(err);
+                    showMessage('通信エラー: ' + errMsg, false);
+                })
+                .addManualLog({
+                    empId: empId,
+                    empName: empName,
+                    workType: empWorkType,
+                    dateStr: dateStr,
+                    timeStr: timeStr,
+                    type: type
+                });
+        }
+
+        function showMessage(text, isSuccess) {
+            const msgEl = document.getElementById('msg');
+            msgEl.innerText = text;
+            msgEl.className = 'message ' + (isSuccess ? 'success' : 'error');
+        }
+    </script>
+</body>
+</html>
+

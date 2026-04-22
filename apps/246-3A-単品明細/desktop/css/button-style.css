@@ -1,0 +1,36 @@
+/* 共通ボタンデザイン */
+.my-kintone-button {
+    background-color: #007bff;
+    border: 1px solid #2276c7;
+    box-shadow: 1px 1px 1px #fff inset;
+    box-sizing: border-box;
+    display: inline-block;
+    height: 40px;
+    margin: 3px 6px 0 0;
+    overflow: hidden;
+    padding: 0 16px;
+    position: relative;
+    min-width: auto;
+    text-overflow: ellipsis;
+    vertical-align: top;
+    width: auto;
+    font-size: 14px;
+    font-weight: bold;
+    text-align: center;
+    line-height: 40px;
+    cursor: pointer;
+    color: #fff;
+    transition: background-color 0.15s, color 0.15s;
+}
+.my-kintone-button:hover {
+    background-color: #339cff;
+}
+.my-kintone-button:active {
+    background-color: #0056b3;
+}
+.my-kintone-button:disabled,
+.my-kintone-button[disabled] {
+    background-color: #d3d3d3 !important;
+    color: #666 !important;
+    cursor: not-allowed !important;
+}

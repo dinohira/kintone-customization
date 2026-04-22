@@ -1,0 +1,61 @@
+/* 013 (修正版) */
+/* セレクタを ".button013 a" から "button.button013" に変更 */
+button.button013 {
+    background: #eee;
+    position: relative;
+    display: flex;
+    justify-content: space-around;
+    align-items: center;
+    margin-left: 0;
+    max-width: 240px;
+    padding: 10px 25px;
+    color: #313131;
+    transition: 0.3s ease-in-out;
+    font-weight: 500;
+    z-index: 0;
+    border-left: solid 5px #6bb6ff;
+    border-top: none; /* kintone標準のスタイルを打ち消す */
+    border-right: none;
+    border-bottom: none;
+    cursor: pointer; /* カーソルをポインターに変更 */
+}
+
+/* 疑似要素 :before のセレクタも変更 */
+button.button013:before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 0;
+    display: block;
+    background: #6bb6ff;
+    transition: .3s;
+    left: 0;
+}
+
+/* ホバー時のセレクタも変更 */
+button.button013:hover {
+    color: #FFF;
+}
+
+button.button013:hover:before {
+    width: 100%;
+    z-index: -1;
+}
+
+/* active時のセレクタも変更 */
+button.button013:active {
+    background: #ccc; /* 押したときに少し濃い色に変更 */
+}
+
+/* 処理中のスタイルを追加 */
+button.button013:disabled {
+    color: #999;
+    background: #f5f5f5;
+    border-left-color: #ccc;
+    cursor: not-allowed;
+}
+
+button.button013:disabled:hover:before {
+    width: 0; /* 処理中はホバーエフェクトを無効化 */
+}

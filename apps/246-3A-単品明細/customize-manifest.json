@@ -1,0 +1,33 @@
+{
+    "app":  "246",
+    "scope":  "ALL",
+    "desktop":  {
+                    "js":  [
+                               "desktop/js/checkboxDST.js",
+                               "desktop/js/atomitumori_0.js",
+                               "desktop/js/分納後見積_0.js",
+                               "desktop/js/明細自動採番_0.js",
+                               "desktop/js/一般総合月別明細転記_0.js",
+                               "desktop/js/太字コントロール.js",
+                               "desktop/js/特別加算チェックボックス結合_0.js",
+                               "desktop/js/groupkaihei_0.js",
+                               "desktop/js/大同チャージ自動入力.js",
+                               "desktop/js/DST見積転記ver.1.js",
+                               "desktop/js/3A大同見積転記.js"
+                           ],
+                    "css":  [
+                                "desktop/css/lookup.css",
+                                "desktop/css/button-style.css",
+                                "desktop/css/013.css",
+                                "desktop/css/51-modern-default.css"
+                            ]
+                },
+    "mobile":  {
+                   "js":  [
+
+                          ],
+                   "css":  [
+
+                           ]
+               }
+}

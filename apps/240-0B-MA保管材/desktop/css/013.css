@@ -1,0 +1,87 @@
+/* =================================================
+  ボタンデザイン: 013
+================================================= */
+
+/* --- 基本スタイル --- */
+button.button013 {
+    background: #eee;
+    position: relative;
+    display: flex;
+    justify-content: space-around;
+    align-items: center;
+    margin-left: 100;
+    margin-top: 50;
+    max-width: 240px;
+    padding: 10px 25px;
+    color: #313131;
+    transition: 0.3s ease-in-out;
+    font-weight: 500;
+    z-index: 0;
+    border-left: solid 5px #6bb6ff; /* 通常カラー */
+    border-top: none;
+    border-right: none;
+    border-bottom: none;
+    cursor: pointer;
+}
+
+/* --- ホバーエフェクト用の疑似要素 --- */
+button.button013:before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 0;
+    display: block;
+    background: #6bb6ff; /* 通常カラー */
+    transition: .3s;
+    left: 0;
+    z-index: -1;
+}
+
+/* --- ホバー時のスタイル --- */
+button.button013:hover {
+    color: #FFF;
+}
+
+button.button013:hover:before {
+    width: 100%;
+}
+
+/* --- クリック（アクティブ）時のスタイル --- */
+button.button013:active {
+    background: #ccc;
+}
+
+/* --- 無効（処理中など）のスタイル --- */
+button.button013:disabled {
+    color: #999;
+    background: #f5f5f5;
+    border-left-color: #ccc;
+    cursor: not-allowed;
+}
+
+button.button013:disabled:hover:before {
+    width: 0; /* 無効時はホバーエフェクトを無効化 */
+}
+
+
+/* =================================================
+  モノクローム版 (辞退・失注ボタン用)
+================================================= */
+
+/* --- 基本スタイルの上書き --- */
+button.button013.button013-monochrome {
+    border-left-color: #888; /* グレー系の色に変更 */
+}
+
+/* --- ホバーエフェクト用の疑似要素の上書き --- */
+button.button013.button013-monochrome:before {
+    background: #aaa; /* グレー系の色に変更 */
+}
+
+/* --- ホバー時のテキスト色は白のままでも良いですが、必要に応じて調整 --- */
+/*
+button.button013.button013-monochrome:hover {
+    color: #fff;
+}
+*/

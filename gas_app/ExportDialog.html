@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    body { font-family: sans-serif; padding: 20px; color: #333; }
+    select, button { padding: 8px; font-size: 14px; margin-bottom: 15px; width: 100%; box-sizing: border-box; }
+    button { background-color: #0984e3; color: white; border: none; cursor: pointer; border-radius: 4px; font-weight: bold; }
+    button:hover { background-color: #74b9ff; }
+    #status { font-size: 13px; color: #d63031; text-align: center; }
+  </style>
+</head>
+<body>
+  <label>対象月</label>
+  <select id="monthSelect"></select>
+  
+  <label>締め日区分 / 対象</label>
+  <select id="closingType">
+    <option value="25">25日締め (勤務種別 1, 2, 3)</option>
+    <option value="月末">月末日締め (勤務種別 4)</option>
+  </select>
+  
+  <button id="btn" onclick="generate()">CSVダウンロード</button>
+  <div id="status"></div>
+  
+  <script>
+    const sel = document.getElementById('monthSelect');
+    const now = new Date();
+    for(let i = 0; i < 7; i++){
+       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+       const mStr = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, '0');
+       const opt = document.createElement('option');
+       opt.value = mStr; opt.textContent = mStr;
+       sel.appendChild(opt);
+    }
+    document.getElementById('monthSelect').selectedIndex = 0;
+
+    function generate() {
+      document.getElementById('status').innerText = '現在集計しています... 数秒お待ちください。';
+      document.getElementById('btn').disabled = true;
+      const ym = document.getElementById('monthSelect').value;
+      const type = document.getElementById('closingType').value;
+      google.script.run.withSuccessHandler(download).withFailureHandler(err).generateAggregatedCSV(ym, type);
+    }
+    function download(base64) {
+      if (!base64) { err("対象期間の有効なデータが見つかりませんでした。"); return; }
+      const ym = document.getElementById('monthSelect').value;
+      const type = document.getElementById('closingType').value;
+      
+      const byteCharacters = atob(base64);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+      const blob = new Blob([byteArray], {type: 'text/csv;charset=utf-8;'});
+      const url = URL.createObjectURL(blob);
+      
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `勤怠集計_${ym}_${type}締め.csv`;
+      document.body.appendChild(a);
+      a.click();
+      
+      setTimeout(() => {
+         URL.revokeObjectURL(url);
+         document.body.removeChild(a);
+         err("ダウンロードを開始しました！");
+         setTimeout(() => google.script.host.close(), 2500);
+      }, 100);
+    }
+    function err(msg) {
+      document.getElementById('status').innerText = msg;
+      document.getElementById('btn').disabled = false;
+    }
+  </script>
+</body>
+</html>

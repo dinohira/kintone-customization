@@ -1,0 +1,14 @@
+{
+    "app": "251",
+    "scope": "ALL",
+    "desktop": {
+        "js": [],
+        "css": [
+            "dest/desktop/css/lookup.css"
+        ]
+    },
+    "mobile": {
+        "js": [],
+        "css": []
+    }
+}

@@ -2,9 +2,9 @@
   "name": "kintone-customization",
   "version": "1.0.0",
   "description": "",
-  "main": "0Aテーブル折り返し.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "npx http-server -S -C localhost+1.pem -K localhost+1-key.pem --cors -p 8080"
   },
   "repository": {
     "type": "git",
@@ -16,5 +16,10 @@
   "bugs": {
     "url": "https://github.com/dinohira/kintone-customization/issues"
   },
-  "homepage": "https://github.com/dinohira/kintone-customization#readme"
+  "homepage": "https://github.com/dinohira/kintone-customization#readme",
+  "dependencies": {
+    "@kintone/rest-api-client": "^6.1.4",
+    "chrome-devtools-mcp": "^0.12.1",
+    "dotenv": "^17.4.0"
+  }
 }

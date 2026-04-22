@@ -1,0 +1,1319 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;500;700&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #f4f6f9;
+            --pane-bg: #ffffff;
+            --text-main: #2d3436;
+            --accent-color: #0984e3;
+            --success-color: #00b894;
+            --danger-color: #ff7675;
+            --border-color: #edf2f7;
+            --shadow-sm: 0 4px 15px rgba(0,0,0,0.03);
+            --shadow-md: 0 8px 30px rgba(0,0,0,0.06);
+        }
+
+        body {
+            font-family: 'Inter', 'Noto Sans JP', sans-serif;
+            margin: 0;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+        }
+
+        /* 左側：無限リールペイン (40%) */
+        #left-pane {
+            width: 40%;
+            background: var(--pane-bg);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            box-shadow: 4px 0 20px rgba(0, 0, 0, 0.04);
+            z-index: 5;
+        }
+
+        #list-header {
+            padding: 30px 20px;
+            font-weight: 700;
+            font-size: 20px;
+            text-align: center;
+            border-bottom: 1px solid var(--border-color);
+            letter-spacing: 2px;
+            color: var(--accent-color);
+        }
+
+        #member-list-wrapper {
+            flex: 1;
+            overflow-y: auto;
+            position: relative;
+            scroll-behavior: auto;
+        }
+
+        #member-list-wrapper::-webkit-scrollbar {
+            display: none;
+        }
+
+        #member-list {
+            padding: 10px 0;
+            margin: 0;
+            min-height: 101%;
+        }
+
+        .emp-btn {
+            width: 85%;
+            margin: 12px auto;
+            padding: 25px 20px;
+            display: block;
+            border: 1px solid transparent;
+            border-radius: 18px;
+            background: #ffffff;
+            color: var(--text-main);
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            text-align: left;
+            position: relative;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .emp-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-md);
+        }
+
+        .emp-btn.selected {
+            border-color: #74b9ff;
+            background: #f0f7ff;
+            box-shadow: 0 4px 15px rgba(9, 132, 227, 0.15);
+            transform: scale(1.02);
+            z-index: 10;
+        }
+
+        .emp-name {
+            font-size: 20px;
+            font-weight: 700;
+            display: block;
+            pointer-events: none;
+            letter-spacing: 1px;
+        }
+
+        .status-dot {
+            position: absolute;
+            right: 25px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        /* 右側構成 (60%) */
+        #right-pane {
+            width: 60%;
+            display: flex;
+            flex-direction: column;
+            background: var(--bg-color);
+        }
+
+        #top-right {
+            height: 45%;
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            justify-content: space-evenly;
+            background: var(--pane-bg);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .time-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        /* カレンダー用スタイル */
+        #calendar-container {
+            background: #ffffff;
+            border-radius: 20px;
+            padding: 15px 20px;
+            box-shadow: var(--shadow-md);
+            border: 1px solid var(--border-color);
+        }
+        .cal-table {
+            border-collapse: collapse;
+            font-size: 14px;
+            text-align: center;
+        }
+        .cal-table th {
+            color: #b2bec3;
+            padding: 5px;
+            font-weight: 700;
+        }
+        .cal-table td {
+            padding: 6px 10px;
+            color: #2d3436;
+            font-weight: 500;
+        }
+        .cal-today {
+            background: linear-gradient(135deg, var(--accent-color), #74b9ff);
+            color: white !important;
+            border-radius: 50%;
+            font-weight: 700;
+            display: inline-block;
+            width: 26px;
+            height: 26px;
+            line-height: 26px;
+            box-shadow: 0 4px 10px rgba(9, 132, 227, 0.3);
+        }
+        .cal-sun { color: var(--danger-color); }
+        .cal-sat { color: var(--accent-color); }
+        .cal-header {
+            text-align: center;
+            font-weight: 700;
+            margin-bottom: 12px;
+            color: var(--accent-color);
+            font-size: 15px;
+            letter-spacing: 1px;
+        }
+
+        #clock {
+            font-size: 96px;
+            font-weight: 300;
+            color: var(--text-main);
+            letter-spacing: -3px;
+            text-shadow: 2px 4px 10px rgba(0,0,0,0.03);
+        }
+
+        #date-display {
+            font-size: 18px;
+            color: #b2bec3;
+            font-weight: 500;
+            margin-bottom: -15px;
+            letter-spacing: 2px;
+        }
+
+        #bottom-right {
+            position: relative;
+            height: 55%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 15px;
+        }
+
+        #idle-countdown {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: var(--danger-color);
+            color: #ffffff;
+            font-size: 26px;
+            font-weight: 700;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 15px rgba(255,118,117,0.4);
+            z-index: 100;
+        }
+
+        #msg {
+            font-size: 24px;
+            font-weight: 700;
+            margin-bottom: 15px;
+            color: #636e72;
+            text-align: center;
+            letter-spacing: 1px;
+        }
+
+        .punch-btn {
+            border: none;
+            border-radius: 24px;
+            color: white;
+            font-weight: 700;
+            cursor: pointer;
+            box-shadow: var(--shadow-md);
+            transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s;
+            letter-spacing: 3px;
+        }
+        
+        .punch-btn:active {
+            transform: scale(0.97);
+            box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+        }
+
+        #btn-in {
+            width: 480px;
+            height: 115px;
+            font-size: 42px;
+            background: linear-gradient(135deg, #00b894, #00cec9);
+        }
+
+        #active-buttons {
+            display: flex;
+            width: 480px;
+            height: 115px;
+            gap: 15px;
+        }
+
+        #btn-out {
+            flex: 1;
+            height: 115px;
+            font-size: 42px;
+            background: linear-gradient(135deg, #ff7675, #d63031);
+        }
+
+        .side-btn-container {
+            width: 90px;
+            height: 115px;
+        }
+
+        .sub-btn {
+            width: 100%;
+            height: 100%;
+            border: none;
+            border-radius: 20px;
+            font-weight: 700;
+            font-size: 22px;
+            writing-mode: vertical-rl;
+            text-orientation: upright;
+            letter-spacing: 6px;
+            cursor: pointer;
+            box-shadow: var(--shadow-sm);
+            transition: transform 0.2s, box-shadow 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .sub-btn:active {
+            transform: scale(0.95);
+        }
+
+        #btn-goout {
+            background: linear-gradient(135deg, #ffeaa7, #fdcb6e);
+            color: #d35400;
+        }
+
+        #btn-return {
+            background: linear-gradient(135deg, #74b9ff, #0984e3);
+            color: #ffffff;
+        }
+
+        #btn-reset {
+            margin-top: 20px;
+            background: #ffffff;
+            border: 2px solid #dfe6e9;
+            color: #636e72;
+            padding: 12px 35px;
+            border-radius: 30px;
+            cursor: pointer;
+            font-weight: 700;
+            letter-spacing: 1px;
+            transition: all 0.2s;
+        }
+        
+        #btn-reset:hover {
+            background: #f8f9fa;
+            border-color: #b2bec3;
+            color: #2d3436;
+        }
+
+        /* 修正申請フォーム用スタイル */
+        #correction-form {
+            width: 100%;
+            max-width: 420px;
+            background: #ffffff;
+            border-radius: 20px;
+            padding: 25px;
+            box-shadow: var(--shadow-md);
+            border: 1px solid var(--border-color);
+            display: none;
+            flex-direction: column;
+            gap: 15px;
+            z-index: 10;
+            margin-top: -10px;
+        }
+        
+        .form-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--accent-color);
+            text-align: center;
+            margin-bottom: 2px;
+            letter-spacing: 1px;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            text-align: left;
+        }
+
+        .form-label {
+            font-size: 13px;
+            font-weight: 700;
+            color: #b2bec3;
+        }
+
+        .form-input {
+            padding: 8px 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            font-size: 15px;
+            font-family: inherit;
+            background: #f8f9fa;
+            color: var(--text-main);
+        }
+        
+        .form-actions {
+            display: flex;
+            gap: 12px;
+            margin-top: 4px;
+        }
+
+        .btn-submit-form {
+            flex: 1;
+            background: linear-gradient(135deg, #0984e3, #74b9ff);
+            color: white;
+            border: none;
+            padding: 10px;
+            border-radius: 15px;
+            font-weight: 700;
+            font-size: 16px;
+            cursor: pointer;
+            box-shadow: var(--shadow-sm);
+            transition: transform 0.2s;
+        }
+        
+        .btn-submit-form:active { transform: scale(0.96); }
+
+        .btn-cancel-form {
+            width: 100px;
+            background: #ffffff;
+            color: #636e72;
+            border: 2px solid #dfe6e9;
+            padding: 14px;
+            border-radius: 15px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        
+        .btn-cancel-form:hover { background: #f8f9fa; }
+        
+        .link-btn {
+            background: none;
+            border: none;
+            color: #b2bec3;
+            text-decoration: underline;
+            font-weight: 600;
+            cursor: pointer;
+            font-size: 14px;
+            transition: color 0.2s;
+        }
+        .link-btn:hover { color: var(--accent-color); }
+
+        /* B2: 打刻履歴パネル */
+        #log-history-panel {
+            display: none;
+            width: 100%;
+            margin-top: 12px;
+            background: #ffffff;
+            border-radius: 14px;
+            padding: 16px;
+            box-shadow: var(--shadow-sm);
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        #log-history-panel .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        #log-history-panel .panel-header span {
+            font-weight: 700;
+            font-size: 15px;
+            color: #2d3436;
+        }
+        #log-history-panel .close-panel {
+            background: none;
+            border: none;
+            font-size: 18px;
+            color: #b2bec3;
+            cursor: pointer;
+        }
+        .log-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+        .log-table th {
+            background: #f8f9fa;
+            padding: 6px 8px;
+            text-align: left;
+            font-weight: 600;
+            color: #636e72;
+            border-bottom: 2px solid #dfe6e9;
+        }
+        .log-table td {
+            padding: 5px 8px;
+            border-bottom: 1px solid #f0f0f0;
+        }
+        .log-table .action-出勤 { color: #00b894; font-weight: 600; }
+        .log-table .action-退勤 { color: #d63031; font-weight: 600; }
+        .log-table .action-外出 { color: #fdcb6e; font-weight: 600; }
+        .log-table .action-帰社 { color: #0984e3; font-weight: 600; }
+        .log-loading { text-align: center; padding: 20px; color: #b2bec3; }
+
+        /* Phase 4: インラインスタイルから移行 */
+        #normal-ui {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 100%;
+        }
+
+        #sub-links-container {
+            display: none;
+            flex-direction: column;
+            gap: 10px;
+            margin-top: 15px;
+            text-align: center;
+        }
+
+        #pl-warning {
+            display: none;
+            color: var(--danger-color);
+            font-size: 14px;
+            font-weight: 700;
+            margin-top: 10px;
+            text-align: center;
+            max-width: 90%;
+            background: #fff5f5;
+            padding: 10px 15px;
+            border-radius: 10px;
+            border: 1px solid #ffcccc;
+        }
+
+                /* 休暇種別タブ */        
+        .leave-type-tabs {
+            display: flex;
+            gap: 6px;
+            margin-bottom: 4px;
+        }
+        .leave-type-tab {
+            flex: 1;
+            padding: 6px 8px;
+            border: 2px solid var(--border-color);
+            border-radius: 12px;
+            background: #f8f9fa;
+            color: #636e72;
+            font-weight: 700;
+            font-size: 13px;
+            cursor: pointer;
+            text-align: center;
+            transition: all 0.2s;
+        }
+        .leave-type-tab.active {
+            border-color: var(--accent-color);
+            background: #f0f7ff;
+            color: var(--accent-color);
+        }
+        .leave-type-tab.active-nursing {
+            border-color: #6c5ce7;
+            background: #f3f0ff;
+            color: #6c5ce7;
+        }
+        .leave-type-tab.active-care {
+            border-color: #e17055;
+            background: #fff5f0;
+            color: #e17055;
+        }
+        .leave-remaining {
+            font-size: 13px;
+            font-weight: 600;
+            padding: 8px 12px;
+            border-radius: 10px;
+            text-align: center;
+            margin-bottom: 5px;
+        }
+        .leave-remaining.nursing {
+            background: #f3f0ff;
+            color: #6c5ce7;
+        }
+        .leave-remaining.care {
+            background: #fff5f0;
+            color: #e17055;
+        }
+        .leave-remaining.paid {
+            background: #f0f7ff;
+            color: #0984e3;
+        }
+        .leave-remaining.warning {
+            background: #fff5f5;
+            color: #d63031;
+        }
+        .btn-submit-form:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .leave-note {
+            font-size: 12px;
+            color: #b2bec3;
+            text-align: center;
+            margin-top: -5px;
+        }
+
+        #paidleave-form {
+            display: none;
+            flex-direction: column;
+            gap: 8px;
+            width: 100%;
+            max-width: 420px;
+            background: #ffffff;
+            border-radius: 20px;
+            padding: 15px 20px;
+            box-shadow: var(--shadow-md);
+            border: 1px solid var(--border-color);
+            z-index: 10;
+            margin-top: -20px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="left-pane">
+        <div id="list-header">ATTENDANCE</div>
+        <div id="member-list-wrapper">
+            <div id="member-list">
+            </div>
+        </div>
+    </div>
+
+    <div id="right-pane">
+        <div id="top-right">
+            <div class="time-container">
+                <div id="date-display">LOADING...</div>
+                <div id="clock">00:00</div>
+            </div>
+            <div id="calendar-container"></div>
+        </div>
+        <div id="bottom-right">
+            <div id="idle-countdown">5</div>
+            <div id="normal-ui">
+                <div id="msg">データを読み込み中...</div>
+                <button id="btn-in" class="punch-btn" style="display:none;" onclick="submit('出勤')">START</button>
+                <div id="active-buttons" style="display:none;">
+                    <button id="btn-out" class="punch-btn" onclick="submit('退勤')">END</button>
+                    <div class="side-btn-container">
+                        <button id="btn-goout" class="sub-btn" onclick="submit('外出')">外出</button>
+                        <button id="btn-return" class="sub-btn" style="display:none;" onclick="submit('帰社')">帰社</button>
+                    </div>
+                </div>
+                <button id="btn-reset" onclick="reset()">選択解除</button>
+                <div id="sub-links-container">
+                    <button class="link-btn" onclick="showForm()">打刻ミス・漏れの修正申請はこちら</button>
+                    <button class="link-btn" onclick="showPaidLeaveForm()">休暇申請はこちら（有給/看護/介護）</button>
+                    <button class="link-btn" onclick="showLogHistory()">直近の打刻履歴を確認</button>
+                </div>
+                <div id="log-history-panel">
+                    <div class="panel-header">
+                        <span>📋 直近7日間の打刻履歴</span>
+                        <button class="close-panel" onclick="hideLogHistory()">✕</button>
+                    </div>
+                    <div id="log-history-body"><div class="log-loading">読み込み中...</div></div>
+                </div>
+                <div id="pl-warning"></div>
+            </div>
+
+            <!-- 有給休暇申請フォーム -->
+            <div id="paidleave-form">
+                <div class="form-title" id="leave-form-title">休暇申請フォーム</div>
+                <div class="leave-type-tabs">
+                    <button class="leave-type-tab active" onclick="switchLeaveType('paid')" id="tab-paid">有給休暇</button>
+                    <button class="leave-type-tab" onclick="switchLeaveType('nursing')" id="tab-nursing">看護休暇</button>
+                    <button class="leave-type-tab" onclick="switchLeaveType('care')" id="tab-care">介護休暇</button>
+                </div>
+                <div id="leave-remaining-info" style="display:none"></div>
+                <div id="leave-note" class="leave-note" style="display:none"></div>
+                <div class="form-group">
+                    <label class="form-label">取得希望日 (全日)</label>
+                    <input type="date" id="pl-date" class="form-input">
+                </div>
+                <div class="form-group" id="pl-reason-group">
+                    <label class="form-label">事由 (任意)</label>
+                    <select id="pl-reason-type" class="form-input" style="cursor:pointer;">
+                        <option value="">--- (無選択)</option>
+                        <option value="病気">病気</option>
+                        <option value="自己都合">自己都合</option>
+                    </select>
+                </div>
+                <div class="form-group" id="pl-memo-group">
+                    <label class="form-label">備考・自由入力 (任意)</label>
+                    <input type="text" id="pl-reason-text" class="form-input" placeholder="例: 私用のため">
+                </div>
+                <div class="form-actions">
+                    <button class="btn-cancel-form" onclick="hidePaidLeaveForm()">戻る</button>
+                    <button class="btn-submit-form" onclick="submitPaidLeave()">有給を申請する</button>
+                </div>
+            </div>
+
+            <div id="correction-form">
+                <div class="form-title">打刻修正・申告フォーム</div>
+                <div class="form-group">
+                    <label class="form-label">対象日</label>
+                    <input type="date" id="form-date" class="form-input">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">申告内容</label>
+                    <select id="form-reason" class="form-input">
+                        <option value="打刻忘れ">打刻忘れ</option>
+                        <option value="打刻区分の間違い (出勤/退勤など)">打刻区分の間違い (出勤/退勤など)</option>
+                        <option value="他人の名前で打刻してしまった">他人の名前で打刻してしまった</option>
+                        <option value="二重打刻してしまった">二重打刻してしまった</option>
+                        <option value="その他">その他</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">正しい打刻時間 / 詳細</label>
+                    <input type="text" id="form-details" class="form-input" placeholder="例: 08:30に出勤しました">
+                </div>
+                <div class="form-actions">
+                    <button class="btn-cancel-form" onclick="hideForm()">戻る</button>
+                    <button class="btn-submit-form" onclick="submitForm()">送信</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Phase 5: グローバル変数をAppオブジェクトにカプセル化
+        const App = {
+            selectedEmpId: null,
+            originalData: [],
+            idleTimer: null,
+            countdownTimer: null,
+            lastScrollTop: 0
+        };
+
+        // ▼ タッチ音（ビープ音）を鳴らす関数 ▼
+        let audioCtx = null;
+        function playBeep() {
+            try {
+                if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+                
+                const oscillator = audioCtx.createOscillator();
+                const gainNode = audioCtx.createGain();
+                
+                oscillator.type = 'triangle'; // 落ち着いた「ピッ」という音
+                oscillator.frequency.setValueAtTime(880, audioCtx.currentTime); // 高めの音
+                gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime); // 音量を10%に抑える
+                
+                oscillator.connect(gainNode);
+                gainNode.connect(audioCtx.destination);
+                
+                oscillator.start();
+                oscillator.stop(audioCtx.currentTime + 0.1); // 0.1秒間鳴らす
+            } catch (e) {
+                console.log("Audio not supported");
+            }
+        }
+
+        // 画面のどこをタッチ（クリック）しても音を鳴らす
+        document.addEventListener('touchstart', function() { playBeep(); }, {passive: true});
+        document.addEventListener('mousedown', function() { playBeep(); }, {passive: true});
+
+        function resetIdleTimer() {
+            if (App.idleTimer) clearTimeout(App.idleTimer);
+            if (App.countdownTimer) clearInterval(App.countdownTimer);
+            
+            const countdownEl = document.getElementById('idle-countdown');
+            if (countdownEl) countdownEl.style.display = 'none';
+
+            if (!App.selectedEmpId) return;
+            
+            App.idleTimer = setTimeout(() => {
+                let secondsLeft = 5;
+                if (!countdownEl) return;
+                countdownEl.style.display = 'flex';
+                countdownEl.innerText = secondsLeft;
+                
+                App.countdownTimer = setInterval(() => {
+                    secondsLeft--;
+                    if (secondsLeft > 0) {
+                        countdownEl.innerText = secondsLeft;
+                    } else {
+                        clearInterval(App.countdownTimer);
+                        reset(); // 30秒で選択解除
+                    }
+                }, 1000);
+            }, 25000); // 25秒後にカウントダウン開始（合計30秒待機）
+        }
+
+        function updateClock() {
+            const now = new Date();
+            document.getElementById('clock').innerText = now.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', hour12: false });
+            document.getElementById('date-display').innerText = now.toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit', weekday: 'short' }).toUpperCase();
+        }
+        setInterval(updateClock, 1000);
+
+        window.onload = () => {
+            updateClock();
+            renderCalendar();
+            fetchList();
+            
+            // 右下ペインの操作監視（無操作タイマーリセット用）
+            const rp = document.getElementById('right-pane');
+            rp.addEventListener('click', resetIdleTimer);
+            rp.addEventListener('input', resetIdleTimer);
+            rp.addEventListener('touchstart', resetIdleTimer);
+        };
+
+        function renderCalendar() {
+            const now = new Date();
+            const year = now.getFullYear();
+            const month = now.getMonth();
+            const today = now.getDate();
+            
+            const firstDay = new Date(year, month, 1).getDay();
+            const daysInMonth = new Date(year, month + 1, 0).getDate();
+            
+            let html = `<div class="cal-header">${year}年 ${month + 1}月</div>`;
+            html += `<table class="cal-table"><tr><th class="cal-sun">日</th><th>月</th><th>火</th><th>水</th><th>木</th><th>金</th><th class="cal-sat">土</th></tr><tr>`;
+            
+            let dayOfWeek = 0;
+            for (let i = 0; i < firstDay; i++) {
+                html += `<td></td>`;
+                dayOfWeek++;
+            }
+            
+            for (let day = 1; day <= daysInMonth; day++) {
+                let cls = "";
+                if (day === today) cls = "cal-today";
+                else if (dayOfWeek === 0) cls = "cal-sun";
+                else if (dayOfWeek === 6) cls = "cal-sat";
+                
+                html += `<td><span class="${cls}">${day}</span></td>`;
+                dayOfWeek++;
+                
+                if (dayOfWeek === 7 && day !== daysInMonth) {
+                    html += `</tr><tr>`;
+                    dayOfWeek = 0;
+                }
+            }
+            html += `</tr></table>`;
+            document.getElementById('calendar-container').innerHTML = html;
+        }
+
+        function fetchList() {
+            google.script.run
+                .withSuccessHandler(initList)
+                .withFailureHandler(err => {
+                    document.getElementById('msg').innerText = "取得失敗: " + err;
+                })
+                .getEmployeeData();
+        }
+
+        function initList(data) {
+            if (!data || data.length === 0) {
+                document.getElementById('msg').innerText = "従業員マスタが空です";
+                return;
+            }
+            App.originalData = data;
+            const list = document.getElementById('member-list');
+            const wrapper = document.getElementById('member-list-wrapper');
+
+            // Phase 5: 動的追加方式の無限スクロール（15倍コピーの力技を廃止）
+            // 初回は5セット分を描画し、スクロール終端付近で自動追加
+            list.innerHTML = "";
+            const INITIAL_SETS = 5;
+            for (let i = 0; i < INITIAL_SETS; i++) {
+                appendOneSet_(list, data);
+            }
+
+            // スクロール監視: 底近くで1セット追加
+            wrapper.onscroll = function() {
+                const threshold = 300; // px
+                if (wrapper.scrollTop + wrapper.clientHeight >= wrapper.scrollHeight - threshold) {
+                    appendOneSet_(list, data);
+                }
+            };
+
+            if (!App.selectedEmpId) {
+                document.getElementById('msg').innerText = "従業員を選択してください";
+            }
+
+            // スクロール位置の初期化（少し遅らせて実行）
+            setTimeout(() => {
+                // リフレッシュ時に直前のスクロール位置があれば維持する（カクつき軽減）
+                if (App.lastScrollTop > 0) {
+                    wrapper.scrollTop = App.lastScrollTop;
+                } else {
+                    const totalHeight = list.offsetHeight;
+                    wrapper.scrollTop = totalHeight / 3;
+                }
+            }, 100);
+        }
+
+        /** 従業員リスト1セット分のボタンをDOMに追加する */
+        function appendOneSet_(list, data) {
+            data.forEach(emp => {
+                const b = document.createElement('button');
+                b.className = 'emp-btn';
+                if (App.selectedEmpId && String(emp.id) === String(App.selectedEmpId)) {
+                    b.classList.add('selected');
+                }
+                b.dataset.id = emp.id;
+                b.innerHTML = `
+          <span class="status-dot" style="background:${emp.status === '出勤' || emp.status === '戻り' || emp.status === '帰社' ? '#00b894' : (emp.status === '外出' ? '#fdcb6e' : '#dfe6e9')}"></span>
+          <span class="emp-name">${emp.name}</span>
+        `;
+                b.onclick = function () { onSelect(emp); };
+                list.appendChild(b);
+            });
+        }
+
+        function onSelect(emp) {
+            App.selectedEmpId = emp.id;
+            resetIdleTimer();
+
+            // 同じIDを持つボタンすべてを選択状態にする
+            document.querySelectorAll('.emp-btn').forEach(btn => {
+                if (String(btn.dataset.id) === String(emp.id)) {
+                    btn.classList.add('selected');
+                } else {
+                    btn.classList.remove('selected');
+                }
+            });
+
+            const msg = document.getElementById('msg');
+            const bin = document.getElementById('btn-in');
+            const bout = document.getElementById('btn-out');
+
+            let displayStatus = "";
+            switch (emp.status) {
+                case "出勤": displayStatus = "出勤中"; break;
+                case "外出": displayStatus = "外出中"; break;
+                case "帰社": displayStatus = "出勤中"; break;
+                case "退勤": displayStatus = "退勤済"; break;
+                default: displayStatus = "未出勤"; break;
+            }
+
+            msg.innerText = `${emp.name} (${displayStatus})`;
+
+            document.getElementById('btn-in').style.display = "none";
+            document.getElementById('active-buttons').style.display = "none";
+            document.getElementById('sub-links-container').style.display = "none";
+            document.getElementById('pl-warning').style.display = "none";
+
+            const isNightShift = (emp.type === '夜勤');
+
+            if (emp.status === "未出勤" || (emp.status === "退勤" && (isNightShift || emp.isHoliday))) {
+                // 通常の未出勤に加えて、夜勤や休日の場合は退勤後でもそのまま出勤可能にする（UIを復活）
+                document.getElementById('btn-in').style.display = "block";
+                if (emp.status === "退勤" && isNightShift) {
+                    msg.innerText = emp.name + " (前回退勤済 / 出勤可能)";
+                } else if (emp.status === "退勤" && emp.isHoliday) {
+                    msg.innerText = emp.name + " (休日退勤済 / 再度出勤可能)";
+                } else {
+                    msg.innerText = emp.name + " (未出勤)";
+                }
+            } else if (emp.status === "退勤") {
+                msg.innerHTML = `<span style="color:var(--danger-color); font-weight:700;">${emp.name} (退勤済)</span>`;
+            } else {
+                // 出勤中 または 戻り/帰社 または 外出
+                document.getElementById('active-buttons').style.display = "flex";
+                
+                if (emp.status === "外出") {
+                    document.getElementById('btn-goout').style.display = "none";
+                    document.getElementById('btn-return').style.display = "flex";
+                } else {
+                    document.getElementById('btn-goout').style.display = "flex";
+                    document.getElementById('btn-return').style.display = "none";
+                }
+            }
+            
+            document.getElementById('sub-links-container').style.display = "flex";
+
+            // 法定5日取得義務のチェックアラート
+            // 今年10日以上付与された人で、かつ取得済日数が5日未満(4,3,2,1,0)の場合
+            if (emp.granted >= 10 && emp.used < 5) {
+                const needDays = 5 - emp.used;
+                const plWarning = document.getElementById('pl-warning');
+                const deadlineText = emp.deadline && emp.deadline !== "期限不明" && emp.deadline !== "" ? `${emp.deadline}までに` : "期限までに";
+                plWarning.innerHTML = `⚠️ 労働基準法で定められていますので、<br><b>${deadlineText}</b>最低5日の有給を取得してください<br>（あと ${needDays} 日）`;
+                plWarning.style.display = "block";
+            }
+        }
+
+        function submit(type) {
+            if (!App.selectedEmpId) return;
+
+            const emp = App.originalData.find(e => String(e.id) === String(App.selectedEmpId));
+            const targetName = emp.name;
+
+            // 楽観的UI：即座に完了表示
+            document.getElementById('btn-in').style.display = "none";
+            document.getElementById('active-buttons').style.display = "none";
+            document.getElementById('sub-links-container').style.display = "none";
+            document.getElementById('pl-warning').style.display = "none";
+            document.getElementById('msg').innerHTML = `<span style="color:var(--success-color); font-weight:700;">${type}完了！</span>`;
+
+            // メモリ上のステータスを一時的に更新
+            emp.status = type;
+
+            // 【UI改善】通信完了を待たずにUIの該当ランプの色を即座に更新する
+            const newColor = (type === '出勤' || type === '戻り' || type === '帰社') ? '#00b894' : (type === '外出' ? '#fdcb6e' : '#dfe6e9');
+            document.querySelectorAll(`.emp-btn[data-id="${App.selectedEmpId}"] .status-dot`).forEach(dot => {
+                dot.style.background = newColor;
+            });
+
+            // 通信の長さに依存せず、ボタンを押した瞬間から0.8秒後に必ずリセットする
+            setTimeout(reset, 800);
+
+            google.script.run.withSuccessHandler(() => {
+                // 通信完了後、裏側でひっそりとリスト全体を最新化（他の人の打刻を反映）
+                const wrapper = document.getElementById('member-list-wrapper');
+                if (wrapper) App.lastScrollTop = wrapper.scrollTop;
+                fetchList();
+            }).recordTime(App.selectedEmpId, type);
+        }
+
+        function reset() {
+            App.selectedEmpId = null;
+            resetIdleTimer(); // タイマー停止
+            document.querySelectorAll('.emp-btn').forEach(el => el.classList.remove('selected'));
+            document.getElementById('btn-in').style.display = "none";
+            document.getElementById('active-buttons').style.display = "none";
+            document.getElementById('sub-links-container').style.display = "none";
+            document.getElementById('pl-warning').style.display = "none";
+            document.getElementById('msg').innerText = "従業員を選択してください";
+            if (typeof hideForm === 'function') hideForm();
+            if (typeof hidePaidLeaveForm === 'function') hidePaidLeaveForm();
+        }
+
+        function showForm() {
+            document.getElementById('normal-ui').style.display = 'none';
+            document.getElementById('correction-form').style.display = 'flex';
+            
+            const now = new Date();
+            const y = now.getFullYear();
+            const m = String(now.getMonth() + 1).padStart(2, '0');
+            const d = String(now.getDate()).padStart(2, '0');
+            document.getElementById('form-date').value = `${y}-${m}-${d}`;
+        }
+
+        function hideForm() {
+            document.getElementById('correction-form').style.display = 'none';
+            document.getElementById('normal-ui').style.display = 'flex';
+        }
+
+        function submitForm() {
+            if (!App.selectedEmpId) return;
+            const emp = App.originalData.find(e => String(e.id) === String(App.selectedEmpId));
+            const date = document.getElementById('form-date').value;
+            const reason = document.getElementById('form-reason').value;
+            const details = document.getElementById('form-details').value;
+
+            if (!details) {
+                alert("詳細（正しい打刻時間など）を入力してください。");
+                return;
+            }
+
+            const formBtn = document.querySelector('#correction-form .btn-submit-form');
+            formBtn.innerText = "送信中...";
+            formBtn.disabled = true;
+
+            google.script.run
+            .withFailureHandler((err) => {
+                alert("GAS実行エラー発生: " + err.message + "\n\n※主な原因: 「新しいデプロイ」としてバージョン更新が行われていない可能性があります。再度デプロイをお試しください。");
+                formBtn.innerText = "送信";
+                formBtn.disabled = false;
+            })
+            .withSuccessHandler(() => {
+                alert("修正申請を送信しました。");
+                hideForm();
+                formBtn.innerText = "送信";
+                formBtn.disabled = false;
+                document.getElementById('form-details').value = "";
+                reset();
+            }).submitCorrection(App.selectedEmpId, emp.name, date, reason, details);
+        }
+
+        function showPaidLeaveForm() {
+            if (!App.selectedEmpId) return;
+            const emp = App.originalData.find(e => String(e.id) === String(App.selectedEmpId));
+
+            document.getElementById('normal-ui').style.display = 'none';
+            document.getElementById('paidleave-form').style.display = 'flex';
+            switchLeaveType('paid'); // デフォルトは有給タブ
+            
+            const now = new Date();
+            const y = now.getFullYear();
+            const m = String(now.getMonth() + 1).padStart(2, '0');
+            const d = String(now.getDate()).padStart(2, '0');
+            document.getElementById('pl-date').value = `${y}-${m}-${d}`;
+            document.getElementById('pl-reason-type').value = "";
+            document.getElementById('pl-reason-text').value = "";
+        }
+
+        function hidePaidLeaveForm() {
+            document.getElementById('paidleave-form').style.display = 'none';
+            document.getElementById('normal-ui').style.display = 'flex';
+        }
+
+        function submitPaidLeave() {
+            // 看護・介護の場合は専用処理へ分岐
+            if (currentLeaveType === "nursing" || currentLeaveType === "care") {
+                submitNursingCareLeaveUI();
+                return;
+            }
+            if (!App.selectedEmpId) return;
+            const emp = App.originalData.find(e => String(e.id) === String(App.selectedEmpId));
+            
+            // 有給残日数チェック
+            if (emp.remaining <= 0) {
+                alert("有給休暇の残日数が 0 日のため申請できません。");
+                return;
+            }
+            
+            const date = document.getElementById('pl-date').value;
+            const resType = document.getElementById('pl-reason-type').value;
+            const resText = document.getElementById('pl-reason-text').value;
+
+            if (!date) {
+                alert("取得希望日を指定してください。");
+                return;
+            }
+            
+            let reason = "";
+            if (resType) reason += resType;
+            if (resText) {
+                if (reason) reason += " - ";
+                reason += resText;
+            }
+
+            const btn = document.querySelector('#paidleave-form .btn-submit-form');
+            btn.innerText = "送信中...";
+            btn.disabled = true;
+
+            google.script.run
+            .withFailureHandler((err) => {
+                alert("GAS実行エラー発生: " + err.message + "\n\n※主な原因: 「新しいデプロイ」としてバージョン更新が行われていない可能性があります。コード追加後、新しいバージョンとして再デプロイしてください。");
+                btn.innerText = "有給を申請する";
+                btn.disabled = false;
+            })
+            .withSuccessHandler((result) => {
+                btn.innerText = "有給を申請する";
+                btn.disabled = false;
+
+                // A3: 重複申請の場合
+                if (result && result.success === false && result.reason === "duplicate") {
+                    alert("この日は既に有給申請済みです。\n同じ日に重複して申請することはできません。");
+                    return;
+                }
+
+                // A1: Kintone連携の結果に応じたメッセージ分岐
+                if (result && result.kintoneSync === false) {
+                    alert("有給休暇の申請をスプレッドシートに記録しました。\n\n⚠️ ただし、Kintoneへの連携に失敗しました。\n管理者に自動でメール通知済みです。");
+                } else {
+                    alert("有給休暇の申請を送信完了しました。");
+                }
+
+                hidePaidLeaveForm();
+                document.getElementById('pl-reason-type').value = "";
+                document.getElementById('pl-reason-text').value = "";
+                reset();
+            }).submitPaidLeaveAction(App.selectedEmpId, emp.name, date, reason);
+        }
+
+                // ============================================
+        // 休暇種別タブ切替
+        // ============================================
+        let currentLeaveType = "paid"; // paid | nursing | care
+
+        function switchLeaveType(type) {
+            currentLeaveType = type;
+            const tabs = document.querySelectorAll(".leave-type-tab");
+            tabs.forEach(t => { t.className = "leave-type-tab"; });
+
+            const dateInput = document.getElementById("pl-date");
+            const reasonType = document.getElementById("pl-reason-type");
+            const reasonText = document.getElementById("pl-reason-text");
+            const remainInfo = document.getElementById("leave-remaining-info");
+            const leaveNote = document.getElementById("leave-note");
+            const submitBtn = document.querySelector("#paidleave-form .btn-submit-form");
+            const now = new Date();
+            const y = now.getFullYear();
+            const m = String(now.getMonth() + 1).padStart(2, "0");
+            const d = String(now.getDate()).padStart(2, "0");
+            const todayStr = y + "-" + m + "-" + d;
+
+            if (!App.selectedEmpId) return;
+            const emp = App.originalData.find(e => String(e.id) === String(App.selectedEmpId));
+            if (!emp) return;
+
+            if (type === "paid") {
+                document.getElementById("tab-paid").classList.add("active");
+                dateInput.removeAttribute("max");
+                dateInput.value = todayStr;
+                reasonType.style.display = "";
+                document.getElementById("pl-reason-group").style.display = "";
+                document.getElementById("pl-memo-group").style.display = "";
+                // 有給残日数の表示とボタン制御
+                const paidRemaining = emp.remaining;
+                if (paidRemaining <= 0) {
+                    remainInfo.innerHTML = '<div class="leave-remaining warning">⚠️ 有給休暇の残日数が 0 日のため申請できません</div>';
+                    remainInfo.style.display = "block";
+                    submitBtn.disabled = true;
+                } else {
+                    remainInfo.innerHTML = '<div class="leave-remaining paid">有給休暇 残り ' + paidRemaining + ' 日（付与 ' + emp.granted + ' + 繰越 ' + (emp.remaining - emp.granted + emp.used) + ' - 取得済 ' + emp.used + '）</div>';
+                    remainInfo.style.display = "block";
+                    submitBtn.disabled = false;
+                }
+                leaveNote.style.display = "none";
+                submitBtn.innerText = "有給を申請する";
+                submitBtn.style.background = "linear-gradient(135deg, #0984e3, #74b9ff)";
+            } else if (type === "nursing") {
+                document.getElementById("tab-nursing").classList.add("active-nursing");
+                dateInput.removeAttribute("max");
+                dateInput.value = todayStr;
+                reasonType.style.display = "none";
+                document.getElementById("pl-reason-group").style.display = "none";
+                document.getElementById("pl-memo-group").style.display = "none";
+                const remaining = emp.nursingLimit - emp.nursingUsed;
+                if (emp.childCount === 0) {
+                    remainInfo.innerHTML = '<div class="leave-remaining warning">⚠️ 対象の子がいないため申請できません</div>';
+                } else {
+                    remainInfo.innerHTML = '<div class="leave-remaining nursing">看護休暇 残り ' + remaining + ' 日 / 年間 ' + emp.nursingLimit + ' 日（取得済 ' + emp.nursingUsed + ' 日）</div>';
+                }
+                remainInfo.style.display = "block";
+                leaveNote.innerText = "※ 小学校3年生修了までの子の看護のための休暇（無給・事後申請可）";
+                leaveNote.style.display = "block";
+                submitBtn.innerText = "看護休暇を申請する";
+                submitBtn.style.background = "linear-gradient(135deg, #6c5ce7, #a29bfe)";
+            } else if (type === "care") {
+                document.getElementById("tab-care").classList.add("active-care");
+                dateInput.removeAttribute("max");
+                dateInput.value = todayStr;
+                reasonType.style.display = "none";
+                document.getElementById("pl-reason-group").style.display = "none";
+                document.getElementById("pl-memo-group").style.display = "none";
+                const remaining = emp.careLimit - emp.careUsed;
+                if (emp.careFamily === 0) {
+                    remainInfo.innerHTML = '<div class="leave-remaining warning">⚠️ 要介護家族が登録されていないため申請できません</div>';
+                } else {
+                    remainInfo.innerHTML = '<div class="leave-remaining care">介護休暇 残り ' + remaining + ' 日 / 年間 ' + emp.careLimit + ' 日（取得済 ' + emp.careUsed + ' 日）</div>';
+                }
+                remainInfo.style.display = "block";
+                leaveNote.innerText = "※ 要介護状態の家族の介護のための休暇（無給・事後申請可）";
+                leaveNote.style.display = "block";
+                submitBtn.innerText = "介護休暇を申請する";
+                submitBtn.style.background = "linear-gradient(135deg, #e17055, #fab1a0)";
+            }
+        }
+
+        // ============================================
+        // B2: 打刻履歴 表示/非表示
+        // ============================================
+                function submitNursingCareLeaveUI() {
+            if (!App.selectedEmpId) return;
+            const emp = App.originalData.find(e => String(e.id) === String(App.selectedEmpId));
+            const date = document.getElementById("pl-date").value;
+            const reasonText = document.getElementById("pl-reason-text").value;
+            const leaveType = currentLeaveType === "nursing" ? "看護休暇" : "介護休暇";
+
+            if (!date) { alert("取得日を指定してください。"); return; }
+            // 看護・介護は事由・備考なしでOK
+
+            const btn = document.querySelector("#paidleave-form .btn-submit-form");
+            btn.innerText = "送信中...";
+            btn.disabled = true;
+
+            google.script.run
+            .withFailureHandler((err) => {
+                alert("GAS実行エラー: " + err.message);
+                btn.innerText = leaveType + "を申請する";
+                btn.disabled = false;
+            })
+            .withSuccessHandler((result) => {
+                btn.innerText = leaveType + "を申請する";
+                btn.disabled = false;
+                if (result && result.success === false) {
+                    if (result.reason === "duplicate") {
+                        alert("この日は既に" + leaveType + "申請済みです。");
+                    } else if (result.reason === "limit_exceeded") {
+                        alert("年間上限(" + result.limit + "日)に達しています。\n取得済: " + result.used + "日");
+                    } else if (result.reason === "no_eligible_child") {
+                        alert("小3以下の子が従業員マスタに登録されていません。\n管理者に確認してください。");
+                    } else if (result.reason === "no_eligible_family") {
+                        alert("要介護家族が従業員マスタに登録されていません。\n管理者に確認してください。");
+                    } else {
+                        alert("申請に失敗しました: " + (result.reason || "不明なエラー"));
+                    }
+                    return;
+                }
+                let msg = leaveType + "の申請を記録しました。（取得済: " + result.used + "/" + result.limit + "日）";
+                if (result && result.kintoneSync === false) {
+                    msg += "\n\n⚠️ Kintone連携に失敗しました。管理者に通知済みです。";
+                }
+                alert(msg);
+                hidePaidLeaveForm();
+                document.getElementById("pl-reason-text").value = "";
+                // ローカルデータの即時更新
+                if (currentLeaveType === "nursing") emp.nursingUsed = result.used;
+                else emp.careUsed = result.used;
+                reset();
+            }).submitNursingCareLeave(App.selectedEmpId, emp.name, leaveType, date, reasonText);
+        }
+
+        function showLogHistory() {
+            if (!App.selectedEmpId) {
+                alert('従業員を選択してください。');
+                return;
+            }
+            const panel = document.getElementById('log-history-panel');
+            const body = document.getElementById('log-history-body');
+            panel.style.display = 'block';
+            body.innerHTML = '<div class="log-loading">読み込み中...</div>';
+
+            google.script.run
+                .withFailureHandler(() => {
+                    body.innerHTML = '<div class="log-loading">データの取得に失敗しました。</div>';
+                })
+                .withSuccessHandler((logs) => {
+                    if (!logs || logs.length === 0) {
+                        body.innerHTML = '<div class="log-loading">直近7日間の打刻記録はありません。</div>';
+                        return;
+                    }
+                    let html = '<table class="log-table"><thead><tr><th>日付</th><th>時刻</th><th>種別</th></tr></thead><tbody>';
+                    for (const log of logs) {
+                        html += `<tr><td>${log.date}</td><td>${log.time}</td><td class="action-${log.action}">${log.action}</td></tr>`;
+                    }
+                    html += '</tbody></table>';
+                    body.innerHTML = html;
+                })
+                .getRecentLogs(App.selectedEmpId);
+        }
+
+        function hideLogHistory() {
+            document.getElementById('log-history-panel').style.display = 'none';
+        }
+    </script>
+</body>
+
+</html>

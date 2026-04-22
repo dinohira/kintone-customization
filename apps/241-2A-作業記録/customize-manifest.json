@@ -1,0 +1,31 @@
+{
+    "app":  "241",
+    "scope":  "ALL",
+    "desktop":  {
+                    "js":  [
+                               "https://cdn.jsdelivr.net/npm/sweetalert2@11",
+                               "desktop/js/2Aフロートウィンドウ.js",
+                               "desktop/js/2A画面キーボードテンキー.js",
+                               "desktop/js/2A屑分類転記登録.js",
+                               "desktop/js/2A行内容コピー.js",
+                               "desktop/js/2A作業記録テーブル2段表示.js",
+                               "desktop/js/2A統合明細転記.js",
+                               "desktop/js/2A分納日付.js"
+                           ],
+                    "css":  [
+                                "desktop/css/lookup.css",
+                                "desktop/css/テーブル二段表示css.css",
+                                "desktop/css/013.css",
+                                "desktop/css/float-window-style.css",
+                                "desktop/css/51-modern-default.css"
+                            ]
+                },
+    "mobile":  {
+                   "js":  [
+
+                          ],
+                   "css":  [
+
+                           ]
+               }
+}

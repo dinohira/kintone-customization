@@ -1,0 +1,125 @@
+/* ===================================================
+   テーブル「T作業記録」(.subtable-8245632) 2段表示用 v9
+   =================================================== */
+
+/* テーブル全体のコンテナ設定 */
+.subtable-8245632 {
+    width: 100% !important;
+    max-width: 1100px !important;
+    margin: 0 !important;
+    overflow-x: hidden;
+}
+
+/* 元のテーブルヘッダーを非表示に */
+.subtable-8245632 .subtable-header-gaia {
+    display: none !important;
+}
+
+/* 行のレイアウトをFlexboxに変更 */
+.subtable-8245632 tbody tr {
+    position: relative !important;
+    display: flex !important;
+    flex-wrap: wrap !important;
+    align-items: flex-start !important;
+    border-bottom: 1px solid #e3e7e8 !important;
+    padding: 15px 110px 5px 15px !important;
+    margin-bottom: 10px;
+}
+
+/* 偶数行の背景色 */
+.subtable-8245632 tbody tr:nth-child(even) {
+    background-color: #f7f9fa;
+}
+
+/* セルの基本設定 */
+.subtable-8245632 tbody tr > td {
+    border: none !important;
+    padding: 0 4px !important;
+    box-sizing: border-box !important;
+    margin-bottom: 4px !important;
+}
+
+/* --- 1段目のフィールド幅を指定 --- */
+.subtable-8245632 tbody tr > td:nth-child(1) { width: 15% !important; } /* 作業日付 */
+.subtable-8245632 tbody tr > td:nth-child(2) { width: 40% !important; } /* 作業機械 */
+.subtable-8245632 tbody tr > td:nth-child(3) { width: 15% !important; position: relative !important; } /* 開始 */
+.subtable-8245632 tbody tr > td:nth-child(4) { width: 15% !important; position: relative !important; } /* 終了 */
+.subtable-8245632 tbody tr > td:nth-child(5) { width: 15% !important; } /* 作業時間 */
+
+/* --- 2段目への改行を挿入 --- */
+.subtable-8245632 tbody tr > td:nth-child(6)::before {
+    content: '' !important;
+    flex-basis: 100% !important;
+    width: 0 !important; height: 0 !important; margin: 0 !important; padding: 0 !important;
+}
+
+/* --- 2段目のフィールド幅を指定 --- */
+.subtable-8245632 tbody tr > td:nth-child(6) { width: 25% !important; } /* 切断形状 */
+.subtable-8245632 tbody tr > td:nth-child(7) { width: 15% !important; } /* 径 */
+.subtable-8245632 tbody tr > td:nth-child(8) { width: 15% !important; } /* 縦 */
+.subtable-8245632 tbody tr > td:nth-child(9) { width: 15% !important; } /* 横 */
+.subtable-8245632 tbody tr > td:nth-child(10) { width: 15% !important; } /* カット数 */
+.subtable-8245632 tbody tr > td:nth-child(11) { width: 15% !important; } /* 切断面積 */
+
+/* --- ラベルのスタイル --- */
+.subtable-8245632 tbody tr > td .control-gaia[data-label]::before {
+    content: attr(data-label) !important;
+    display: block !important;
+    font-size: 12px !important;
+    color: #fff !important;
+    background-color: #3498db !important;
+    margin-bottom: 6px !important;
+    padding: 5px !important;
+    border-radius: 4px !important;
+    text-align: center !important;
+}
+
+/* --- 時刻入力関連のスタイル --- */
+
+/* ★変更：時刻フィールドの入力内容を中央揃えにする */
+.subtable-8245632 .control-time-field-gaia .input-time-text-cybozu {
+    /* 右側にボタンが重ならないよう、40pxのスペースを確保 */
+    padding-right: 40px !important;
+    /* ★削除：左パディングを削除し、表示崩れを解消 */
+    /* padding-left: 40px !important; */
+    box-sizing: border-box !important;
+    text-align: center !important;
+}
+
+/* 時刻入力ボタンのスタイル */
+.time-stamp-button {
+    position: absolute !important;
+    top: 40px !important;
+    right: 12px !important;
+    width: 30px !important;
+    height: 30px !important;
+    background-color: #3498db !important;
+    color: white !important;
+    border: none !important;
+    border-radius: 50% !important;
+    cursor: pointer !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 0 !important;
+    transition: background-color 0.2s;
+}
+.time-stamp-button:hover {
+    background-color: #2980b9 !important;
+}
+
+/* --- 行操作ボタンのスタイル --- */
+.subtable-8245632 tbody tr > td:last-child {
+    position: absolute !important;
+    right: 5px !important;
+    top: 50% !important;
+    transform: translateY(-50%) !important;
+    width: 100px !important;
+    height: 100% !important;
+    margin: 0 !important; padding: 0 !important;
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: center !important;
+}
+

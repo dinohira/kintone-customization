@@ -1,0 +1,22 @@
+{
+    "app":  "276",
+    "scope":  "ALL",
+    "desktop":  {
+                    "js":  [
+                               "desktop/js/ラベル作成.js"
+                           ],
+                    "css":  [
+                                "desktop/css/013.css",
+                                "desktop/css/51-modern-default.css",
+                                "desktop/css/lookup.css"
+                            ]
+                },
+    "mobile":  {
+                   "js":  [
+
+                          ],
+                   "css":  [
+
+                           ]
+               }
+}

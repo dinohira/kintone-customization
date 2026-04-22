@@ -1,0 +1,19 @@
+{
+    "app": "316",
+    "scope": "ALL",
+    "desktop": {
+        "js": [
+            "desktop/js/4A_CSV出力.js",
+            "desktop/js/年月自動分割_アプリ316.js"
+        ],
+        "css": [
+            "desktop/css/013.css",
+            "desktop/css/lookup.css",
+            "desktop/css/51-modern-default.css"
+        ]
+    },
+    "mobile": {
+        "js": [],
+        "css": []
+    }
+}

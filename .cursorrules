@@ -1,0 +1,38 @@
+# 🤖 Project Rules: Kintone Customization Auto-Deployment
+
+このプロジェクトでは `@kintone/customize-uploader` を使用した全自動デプロイメント環境が構築されています。
+以下のルールに従って、ユーザーからの「アプリのJSを追加して」などの依頼を自律的に遂行してください。
+
+## 1. 📂 フォルダ構成とファイル管理
+- 各kintoneアプリのファイル群は `apps/[アプリID]-[アプリ名]/` の階層ルールで管理すること。（例: `apps/225-0A-見積登録・作成/`）
+- JSファイルは必ず `apps/[アプリID]-[アプリ名]/desktop/js/` または `mobile/js/` に保存すること。
+- CSSファイルは必ず `apps/[アプリID]-[アプリ名]/desktop/css/` または `mobile/css/` に保存すること。
+
+## 2. 📝 マニフェストファイルの更新
+- JS/CSSファイルを新規作成した場合は、必ず `apps/[アプリID]-[アプリ名]/customize-manifest.json` の該当配列 (`desktop.js` 等) に追加すること。
+- マニフェスト内のパスの記載は、必ずファイルからの相対パス（例: `desktop/js/自身のファイル.js`）で記載すること。※ `dest/` プレフィックスなどを誤って付与しないこと。
+
+## 3. 🚀 自動アップロード（デプロイ）の実行
+- コードの作成や修正、`customize-manifest.json` の更新が完了したら、**ユーザーへ許可を求めることなく、ただちに以下のコマンドを実行して即座に本番デプロイを完了させること。**
+
+```powershell
+# PowerShell環境を想定し、ルート階層の .env から認証情報を取得した上でアップロードを実行する
+Push-Location apps/[アプリID]-[アプリ名]
+$envContent = Get-Content ..\..\.env -Raw
+$env:KINTONE_BASE_URL = [regex]::match($envContent, 'KINTONE_BASE_URL="?([^\r\n"]+)"?').Groups[1].Value
+$env:KINTONE_USERNAME = [regex]::match($envContent, 'KINTONE_USERNAME="?([^\r\n"]+)"?').Groups[1].Value
+$env:KINTONE_PASSWORD = [regex]::match($envContent, 'KINTONE_PASSWORD="?([^\r\n"]+)"?').Groups[1].Value
+
+npx @kintone/customize-uploader customize-manifest.json
+Pop-Location
+```
+
+## 4. 🧰 `import` によるアプリ構成の新規取得
+- ユーザーから「新しいアプリIDを追加したい」と依頼された場合は、ルートディレクトリにある `scripts/bulk_import.ps1` を適切に呼び出すか、同等のコマンドを展開すること。
+
+## 5. 🐞 エラー報告と自動デバッグ
+- ブラウザ上のkintone環境でユーザーから「エラーが出た」「動かない」と報告された場合は、Chrome DevTools MCPを利用して原因を特定し、ファイルを修正した上で再度デプロイすること。
+
+## 6. 🗃️ ファイル統合時のバックアップルール
+- 複数のJS/CSSファイルを1つのファイルに統合（リファクタリング）する場合は、元の分割されていた古いファイル群を削除せず、必ず同階層に `_backup/` という退避用フォルダを新規作成してそちらへ移動させること。
+- 万が一統合によって不具合が発生した際、いつでも元の複数ファイル構成へ即座に復元（ロールバック）できるように管理すること。

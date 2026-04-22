@@ -1,0 +1,1709 @@
+﻿function doGet() {
+  return HtmlService.createHtmlOutputFromFile('Index')
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no')
+    .setTitle('社内打刻システム');
+}
+
+// ============================================
+// Kintone Webhook受信エンドポイント（承認・取消逆連携）
+// ============================================
+function doPost(e) {
+  try {
+    if (!e || !e.postData || !e.postData.contents) {
+      return ContentService.createTextOutput(JSON.stringify({status: 'error', reason: 'no contents'}))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    const payload = JSON.parse(e.postData.contents);
+    const eventType = payload.type; // ADD_RECORD, UPDATE_RECORD, DELETE_RECORD
+    
+    // レコード更新イベントのみ処理
+    if (eventType !== 'UPDATE_RECORD') {
+      return ContentService.createTextOutput(JSON.stringify({status: 'skipped', reason: 'not UPDATE_RECORD'}))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+    
+    const record = payload.record;
+    const kintoneRecordId = record['$id'] ? record['$id'].value : null;
+    const rType = record['R種別'] ? record['R種別'].value : null;
+    const cCancel = record['C取消'] ? record['C取消'].value : null;
+    const applicantName = record['申請者名'] ? record['申請者名'].value : '';
+    const startDate = record['開始日'] ? record['開始日'].value : '';
+    
+    if (!kintoneRecordId) {
+      return ContentService.createTextOutput(JSON.stringify({status: 'error', reason: 'no record ID'}))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+    
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const plSheet = ss.getSheetByName('有給休暇申請');
+    if (!plSheet) {
+      return ContentService.createTextOutput(JSON.stringify({status: 'error', reason: 'sheet not found'}))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+    
+    // G列（7列目）のKintoneレコードIDで対象行を検索
+    const plData = plSheet.getDataRange().getValues();
+    let targetRow = -1;
+    // 下から検索し最新の行を優先
+    for (let i = plData.length - 1; i >= 1; i--) {
+      if (String(plData[i][6]) === String(kintoneRecordId)) {
+        targetRow = i + 1; // シート上の行番号(1-indexed)
+        break;
+      }
+    }
+    
+    if (targetRow === -1) {
+      console.warn(`Webhook: KintoneレコードID ${kintoneRecordId} に対応する行が見つかりません`);
+      return ContentService.createTextOutput(JSON.stringify({status: 'error', reason: 'record not found in sheet'}))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+    
+    let action = 'none';
+    
+    // --- 取消処理（C取消がチェックされている場合）---
+    // チェックボックス / ドロップダウン / 配列のいずれの形式にも対応
+    const isCancelled = cCancel === 'true' || cCancel === true || cCancel === 'TRUE' ||
+        (Array.isArray(cCancel) && cCancel.length > 0);
+    
+    if (isCancelled) {
+      // すでにF列がTRUEの場合は二重実行防止
+      if (plData[targetRow - 1][5] !== true && plData[targetRow - 1][5] !== "TRUE") {
+        const empId = plData[targetRow - 1][1].toString();
+        cancelPaidLeaveRow(ss, plSheet, targetRow, empId);
+        action = 'cancelled';
+        console.log(`Webhook: レコード${kintoneRecordId} を取消処理しました（${applicantName}, ${startDate}）`);
+      } else {
+        action = 'already_cancelled';
+        console.log(`Webhook: レコード${kintoneRecordId} は既に取消済みです`);
+      }
+    }
+    // --- 承認処理 ---
+    else if (rType === '休日(承認済)') {
+      // H列（8列目）に承認ステータスを記録
+      plSheet.getRange(targetRow, 8).setValue('承認済');
+      action = 'approved';
+      console.log(`Webhook: レコード${kintoneRecordId} を承認済にしました（${applicantName}, ${startDate}）`);
+    }
+    
+    return ContentService.createTextOutput(JSON.stringify({status: 'ok', action: action, recordId: kintoneRecordId}))
+      .setMimeType(ContentService.MimeType.JSON);
+      
+  } catch (err) {
+    console.error('Webhook処理エラー: ' + err.message);
+    // エラーでも管理者に通知
+    try {
+      const adminEmail = PropertiesService.getScriptProperties().getProperty('ADMIN_EMAIL');
+      if (adminEmail) {
+        MailApp.sendEmail(adminEmail,
+          '【要確認】Kintone Webhook処理エラー',
+          'Kintone Webhookの処理中にエラーが発生しました。\n\n' +
+          'エラー: ' + err.message + '\n' +
+          'ペイロード: ' + (e.postData ? e.postData.contents : '(なし)'));
+      }
+    } catch(me) {}
+    return ContentService.createTextOutput(JSON.stringify({status: 'error', message: err.message}))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+// ============================================
+// 定数定義 & 共通ユーティリティ関数
+// ============================================
+
+// 従業員マスタの列インデックス定数 (0-based, getValues配列アクセス用)
+const M = {
+  ID: 0, NAME: 1, TYPE: 2,
+  STATUS: 4, STATUS_DATE: 5,
+  WORK_TYPE: 6, GRANTED: 7,
+  CARRIED: 8, USED: 9, REMAINING: 10,
+  HIRE_DATE: 11,
+  CHILD_COUNT: 12, CARE_FAMILY: 13,
+  NURSING_USED: 14, CARE_USED: 15
+};
+
+// 有給付与日数テーブル（労働基準法準拠: 0.5年=10日, 1.5年=11日, ...6.5年以降=20日）
+const LEGAL_PAID_LEAVE_DAYS = [10, 11, 12, 14, 16, 18, 20];
+
+/**
+ * 日付を安全にパースする共通関数
+ * Date型、文字列 "YYYY-MM-DD" や "YYYY/MM/DD" に対応
+ */
+function parseDateSafe_(val) {
+  if (val instanceof Date) return val;
+  if (!val) return null;
+  const s = String(val);
+  const matched = s.match(/(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);
+  if (!matched) return null;
+  return new Date(Number(matched[1]), Number(matched[2]) - 1, Number(matched[3]));
+}
+
+/**
+ * カレンダーシートから休日マップ(holidays1, holidays2)を読み込む共通関数
+ * holidays1: B列の休日判定（勤務種別 1,2,4 向け）
+ * holidays2: C列の休日判定（勤務種別 3 向け）
+ */
+function loadHolidays_(ss) {
+  const calSheet = ss.getSheetByName('会社カレンダー');
+  const holidays1 = {};
+  const holidays2 = {};
+  if (calSheet) {
+    const cData = calSheet.getDataRange().getValues();
+    for (let i = 1; i < cData.length; i++) {
+      if (!cData[i][0]) continue;
+      const dStr = (cData[i][0] instanceof Date)
+        ? Utilities.formatDate(cData[i][0], "JST", "yyyy-MM-dd")
+        : String(cData[i][0]).replace(/\//g, "-");
+      holidays1[dStr] = (cData[i][1] === '休日');
+      holidays2[dStr] = (cData[i][2] === '休日');
+    }
+  }
+  return { holidays1, holidays2 };
+}
+
+/**
+ * 従業員マスタからID→{row, data}のMapを構築する共通関数
+ * row: 1-indexed (シートの行番号としてそのまま使える)
+ */
+function buildEmpIndex_(masterData) {
+  const index = {};
+  for (let i = 1; i < masterData.length; i++) {
+    index[String(masterData[i][M.ID])] = { row: i + 1, data: masterData[i] };
+  }
+  return index;
+}
+
+/**
+ * 法定有給付与日数を取得する
+ * @param {number} y - 初回付与（0.5年後）からの経過年数 (0=初回10日, 1=1.5年11日, ...)
+ */
+function getLegalPaidLeaveDays_(y) {
+  if (y < 0) return 0;
+  return LEGAL_PAID_LEAVE_DAYS[Math.min(y, LEGAL_PAID_LEAVE_DAYS.length - 1)];
+}
+
+function getEmployeeData() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const masterSheet = ss.getSheetByName('従業員マスタ');
+  const masterData = masterSheet.getDataRange().getValues();
+  masterData.shift(); 
+  
+  // 打刻ログから各従業員の「最新の打刻」を自動抽出（これによって手動でログを消しても即時アプリに連動する）
+  const logSheet = ss.getSheetByName('打刻ログ');
+  const logData = logSheet ? logSheet.getDataRange().getValues() : [];
+  const latestLog = {}; 
+  // 一番下（最新）の行から上にスキャンし、各IDの最新アクション1つだけを取得
+  for (let i = logData.length - 1; i >= 1; i--) {
+     const eId = String(logData[i][1]);
+     if (!eId || latestLog[eId]) continue;
+     latestLog[eId] = { time: logData[i][0], action: logData[i][4] };
+  }
+  
+  // カレンダー情報を読み取り「本日の休日判定」を行う
+  const { holidays1, holidays2 } = loadHolidays_(ss);
+  const todayDashStr = Utilities.formatDate(new Date(), "JST", "yyyy-MM-dd");
+  
+  const todayStr = Utilities.formatDate(new Date(), "JST", "yyyy/MM/dd");
+  
+  return masterData.filter(emp => emp[M.ID] && String(emp[M.ID]).trim() !== "").map(emp => {
+    const empId = String(emp[M.ID]); 
+    const empName = emp[M.NAME];   
+    const empType = Number(emp[M.TYPE]) || emp[M.TYPE];   
+    
+    const granted = Number(emp[M.GRANTED]) || 0;
+    const used = Number(emp[M.USED]) || 0;
+    const remaining = Number(emp[M.REMAINING]) || 0;
+
+    const hireDateStr = emp[M.HIRE_DATE];
+    let deadlineStr = "";
+    if (hireDateStr) {
+      let hireDate = parseDateSafe_(hireDateStr);
+      if (!isNaN(hireDate.getTime())) {
+         let grantMonth = hireDate.getMonth() + 6;
+         let grantYear = hireDate.getFullYear();
+         if (grantMonth > 11) { grantMonth -= 12; grantYear += 1; }
+         const baseGrantDate = new Date(grantYear, grantMonth, hireDate.getDate());
+         const now = new Date();
+         let nextGrantDate = new Date(now.getFullYear(), grantMonth, baseGrantDate.getDate());
+         if (nextGrantDate.getTime() <= now.getTime()) {
+             nextGrantDate.setFullYear(now.getFullYear() + 1);
+         }
+         const deadlineDate = new Date(nextGrantDate.getTime() - 24 * 60 * 60 * 1000);
+         deadlineStr = Utilities.formatDate(deadlineDate, "JST", "yyyy年M月d日");
+      }
+    }
+    
+    // ▼ 最新ログによる自動判定 ▼
+    let lastStatus = "未出勤";
+    let lastDateStr = "";
+    if (latestLog[empId]) {
+      lastStatus = latestLog[empId].action || "未出勤";
+      // 遅刻・早退のステータスを基本ステータスに正規化（UI判定用）
+      if (lastStatus.startsWith('出勤')) lastStatus = '出勤';
+      else if (lastStatus.startsWith('退勤')) lastStatus = '退勤';
+      try {
+        let d = parseDateSafe_(latestLog[empId].time) || new Date(latestLog[empId].time);
+        lastDateStr = Utilities.formatDate(d, "JST", "yyyy/MM/dd");
+      } catch(e) {}
+    }
+    
+    const isNightShift = (empType === '夜勤');
+    const typeNum = Number(emp[M.WORK_TYPE]) || 0; // G列
+    const isTodayHoliday = (typeNum === 3) ? !!holidays2[todayDashStr] : !!holidays1[todayDashStr];
+    
+    // 日付が変わったら一般の人は「未出勤」にリセット（夜勤は日またぎの業務があるためリセットから除外）
+    if (!isNightShift && lastDateStr !== todayStr) {
+      lastStatus = "未出勤";
+    }
+    
+    // ▼ 看護・介護休暇 資格情報 ▼
+    const childCount = Number(emp[M.CHILD_COUNT]) || 0;
+    const careFamily = Number(emp[M.CARE_FAMILY]) || 0;
+    const nursingUsed = Number(emp[M.NURSING_USED]) || 0;
+    const careUsed = Number(emp[M.CARE_USED]) || 0;
+    const nursingLimit = childCount === 0 ? 0 : (childCount >= 2 ? 10 : 5);
+    const careLimit = careFamily === 0 ? 0 : (careFamily >= 2 ? 10 : 5);
+
+    return { 
+      id: empId, name: empName, type: empType, isHoliday: isTodayHoliday, 
+      status: lastStatus, granted: granted, used: used, remaining: remaining, deadline: deadlineStr,
+      childCount: childCount, careFamily: careFamily,
+      nursingUsed: nursingUsed, careUsed: careUsed,
+      nursingLimit: nursingLimit, careLimit: careLimit 
+    };
+  });
+}
+
+function recordTime(empId, type) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const logSheet = ss.getSheetByName('打刻ログ');
+  const masterSheet = ss.getSheetByName('従業員マスタ');
+  // ログ書き込み用の情報取得と同時に、マスタ側のステータスも更新する
+  const masterData = masterSheet.getDataRange().getValues();
+  
+  const now = new Date();
+  const todayStr = Utilities.formatDate(now, "JST", "yyyy/MM/dd");
+
+  let empName = "", workType = "";
+  let empTypeNum = 1; // デフォルト種別
+  // buildEmpIndex_でMap化して高速検索
+  const empIndex = buildEmpIndex_(masterData);
+  let exactEmpId = empId; 
+  const found = empIndex[String(empId)];
+  if (found) {
+    exactEmpId = String(found.data[M.ID]);
+    empName = found.data[M.NAME];
+    workType = found.data[M.TYPE];
+    empTypeNum = Number(found.data[M.WORK_TYPE]) || 1;
+    // 該当行のE列にステータス、F列に今日の日付を書き込む
+    masterSheet.getRange(found.row, M.STATUS + 1, 1, 2).setValues([[type, todayStr]]);
+  }
+
+  // 遅刻・早退の自動判定
+  let logType = type;
+  if (type === '出勤' || type === '退勤') {
+    const schedule = getSchedule_(empTypeNum);
+    const nowJST = new Date(now.toLocaleString('en-US', {timeZone: 'Asia/Tokyo'}));
+    const nowMinutes = nowJST.getHours() * 60 + nowJST.getMinutes();
+    
+    if (type === '出勤' && nowMinutes > schedule.startMin) {
+      logType = '出勤(遅刻)';
+    } else if (type === '退勤' && nowMinutes < schedule.endMin) {
+      // 夜勤(種別2)の場合: endMin=26*60=1560 → 実際は翌日2:00
+      // 日中勤務の場合のみ早退判定
+      if (empTypeNum !== 2) {
+        logType = '退勤(早退)';
+      }
+    }
+  }
+
+  // appendRowの代わりに直接書き込みで、テキスト書式とデータ設定を1回のAPI呼び出しで完了させる
+  const lastRow = logSheet.getLastRow() + 1;
+  const range = logSheet.getRange(lastRow, 1, 1, 5);
+  range.setNumberFormat("@");  // 全セルをテキスト書式に（ID先頭ゼロ消失防止）
+  range.setValues([[now, exactEmpId, empName, workType, logType]]);
+  // A列（タイムスタンプ）だけ日時書式に戻す
+  logSheet.getRange(lastRow, 1).setNumberFormat("yyyy/MM/dd HH:mm:ss");
+
+  return Utilities.formatDate(now, "JST", "HH:mm");
+}
+
+function submitCorrection(empId, empName, date, reason, details) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let correctionSheet = ss.getSheetByName('打刻修正申請');
+  
+  // シートが存在しない場合は自動で作成してヘッダーを設定する
+  if (!correctionSheet) {
+    correctionSheet = ss.insertSheet('打刻修正申請');
+    correctionSheet.appendRow(['送信日時', '従業員番号', '氏名', '対象日', '申告内容', '詳細・正しい時間', '対応ステータス']);
+    correctionSheet.getRange("A1:G1").setBackground("#f8f9fa").setFontWeight("bold");
+    correctionSheet.setFrozenRows(1);
+    correctionSheet.getRange("B:B").setNumberFormat("@"); // IDのゼロ落ち防止
+  }
+  
+  const now = new Date();
+  // idにシングルクォートをつけてゼロ落ちを完全防止
+  correctionSheet.appendRow([now, "'" + empId, empName, date, reason, details, '未対応']);
+  
+  // ▼ 申請内容を管理者にメールで送信する場合は、以下のコメントアウト(/* */)を外して使用できます ▼
+  
+  const adminEmail = PropertiesService.getScriptProperties().getProperty('ADMIN_EMAIL') || "admin@example.com";
+  const subject = `【打刻修正申請】${empName}様より`;
+  const body = `${empName}様より打刻の修正申請がありました。\n\n対象日: ${date}\n申告内容: ${reason}\n詳細: ${details}\n\n「打刻修正申請」シートを確認してください。`;
+  MailApp.sendEmail(adminEmail, subject, body);
+  
+  
+  return true;
+}
+
+// ============================================
+// B2: 打刻履歴の取得（直近7日分）
+// ============================================
+function getRecentLogs(empId) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const logSheet = ss.getSheetByName('打刻ログ');
+  if (!logSheet) return [];
+  
+  const now = new Date();
+  const sevenDaysAgo = new Date(now.getTime() - 7 * 86400000);
+  const data = logSheet.getDataRange().getValues();
+  const results = [];
+  
+  for (let i = 1; i < data.length; i++) {
+    const eId = String(data[i][1]);
+    if (eId !== String(empId)) continue;
+    const t = (data[i][0] instanceof Date) ? data[i][0] : new Date(data[i][0]);
+    if (isNaN(t.getTime()) || t < sevenDaysAgo) continue;
+    results.push({
+      datetime: Utilities.formatDate(t, "JST", "MM/dd HH:mm"),
+      date: Utilities.formatDate(t, "JST", "MM/dd(E)"),
+      time: Utilities.formatDate(t, "JST", "HH:mm"),
+      action: data[i][4]
+    });
+  }
+  
+  // 新しい順にソート
+  results.sort((a, b) => b.datetime.localeCompare(a.datetime));
+  return results;
+}
+
+
+// ============================================
+// 看護休暇・介護休暇の申請処理（事後申請・承認不要）
+// ============================================
+function submitNursingCareLeave(empId, empName, leaveType, date, reason) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (leaveType !== '看護休暇' && leaveType !== '介護休暇') {
+    return { success: false, reason: 'invalid_type' };
+  }
+  const masterSheet = ss.getSheetByName('従業員マスタ');
+  if (!masterSheet) return { success: false, reason: 'master_not_found' };
+  const masterData = masterSheet.getDataRange().getValues();
+  const empIndex = buildEmpIndex_(masterData);
+  const found = empIndex[String(empId)];
+  if (!found) return { success: false, reason: 'employee_not_found' };
+  const childCount = Number(found.data[M.CHILD_COUNT]) || 0;
+  const careFamily = Number(found.data[M.CARE_FAMILY]) || 0;
+  if (leaveType === '看護休暇' && childCount === 0) {
+    return { success: false, reason: 'no_eligible_child' };
+  }
+  if (leaveType === '介護休暇' && careFamily === 0) {
+    return { success: false, reason: 'no_eligible_family' };
+  }
+  let annualLimit, usedCol;
+  if (leaveType === '看護休暇') {
+    annualLimit = childCount >= 2 ? 10 : 5;
+    usedCol = M.NURSING_USED;
+  } else {
+    annualLimit = careFamily >= 2 ? 10 : 5;
+    usedCol = M.CARE_USED;
+  }
+  const currentUsed = Number(found.data[usedCol]) || 0;
+  if (currentUsed >= annualLimit) {
+    return { success: false, reason: 'limit_exceeded', used: currentUsed, limit: annualLimit };
+  }
+  let ncSheet = ss.getSheetByName('看護・介護休暇');
+  if (!ncSheet) {
+    ncSheet = ss.insertSheet('看護・介護休暇');
+    ncSheet.appendRow(['申請日時', '従業員番号', '氏名', '休暇種別', '取得日', '事由・備考', 'KintoneレコードID']);
+    ncSheet.getRange("A1:G1").setBackground("#f8f9fa").setFontWeight("bold");
+    ncSheet.setFrozenRows(1);
+    ncSheet.getRange("B:B").setNumberFormat("@");
+  }
+  const ncData = ncSheet.getDataRange().getValues();
+  const normalizedDate = parseDateSafe_(date)
+    ? Utilities.formatDate(parseDateSafe_(date), "JST", "yyyy-MM-dd")
+    : String(date);
+  for (let i = 1; i < ncData.length; i++) {
+    const existId = ncData[i][1].toString().replace(/^'/, "");
+    let existDate = "";
+    if (ncData[i][4] instanceof Date) {
+      existDate = Utilities.formatDate(ncData[i][4], "JST", "yyyy-MM-dd");
+    } else {
+      existDate = String(ncData[i][4]);
+    }
+    if (existId === String(empId) && existDate === normalizedDate && ncData[i][3] === leaveType) {
+      return { success: false, reason: 'duplicate' };
+    }
+  }
+  const now = new Date();
+  ncSheet.appendRow([now, "'" + empId, empName, leaveType, date, reason || "（記載なし）", ""]);
+  const lastRow = ncSheet.getLastRow();
+  masterSheet.getRange(found.row, usedCol + 1).setValue(currentUsed + 1);
+  const props = PropertiesService.getScriptProperties();
+  const kintoneDomain = props.getProperty('KINTONE_DOMAIN');
+  const appId = Number(props.getProperty('KINTONE_APP_ID_PAID_LEAVE')) || 324;
+  const apiToken = props.getProperty('KINTONE_API_TOKEN');
+  let kintoneSync = false;
+  let kintoneDate = "";
+  if (date) {
+    const parsed = parseDateSafe_(date);
+    kintoneDate = parsed ? Utilities.formatDate(parsed, "JST", "yyyy-MM-dd") : date;
+  }
+  const payload = {
+    app: appId,
+    record: {
+      "申請者名": { value: empName },
+      "開始日": { value: kintoneDate },
+      "終了日": { value: kintoneDate },
+      "R種別": { value: leaveType },
+      "C終日": { value: ["終日"] },
+      "備考": { value: reason || "" }
+    }
+  };
+  const options = {
+    method: "post",
+    contentType: "application/json",
+    headers: { "X-Cybozu-API-Token": apiToken },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  };
+  try {
+    if (kintoneDomain && apiToken) {
+      const response = UrlFetchApp.fetch('https://' + kintoneDomain + '/k/v1/record.json', options);
+      if (response.getResponseCode() === 200) {
+        const json = JSON.parse(response.getContentText());
+        if (json && json.id) {
+          ncSheet.getRange(lastRow, 7).setValue(json.id);
+          kintoneSync = true;
+        }
+      } else {
+        console.error('Kintone API Error: HTTP ' + response.getResponseCode());
+      }
+    }
+  } catch (e) {
+    console.error("Kintone API Error (nursing/care): " + e.message);
+  }
+  return { success: true, kintoneSync: kintoneSync, used: currentUsed + 1, limit: annualLimit };
+}
+function submitPaidLeaveAction(empId, empName, date, reason) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let plSheet = ss.getSheetByName('有給休暇申請');
+  
+  if (!plSheet) {
+    plSheet = ss.insertSheet('有給休暇申請');
+    plSheet.appendRow(['申請日時', '従業員番号', '氏名', '取得希望日', '事由・備考', '取消 / 差戻']);
+    plSheet.getRange("A1:F1").setBackground("#f8f9fa").setFontWeight("bold");
+    plSheet.setFrozenRows(1);
+    plSheet.getRange("B:B").setNumberFormat("@"); // IDのゼロ落ち防止
+  } else {
+    // 既存のシートにアップデートする場合、F1が「取消 / 差戻」か確認
+    const currentHeader = plSheet.getRange("F1").getValue();
+    if (currentHeader !== "取消 / 差戻") {
+        plSheet.getRange("F1").setValue("取消 / 差戻");
+    }
+  }
+  
+  // ▼ A3: 重複チェック — 同一従業員ID＋同一日付＋未取消の申請がないか確認 ▼
+  const plData = plSheet.getDataRange().getValues();
+  // 申請日（date）をyyyy-MM-dd形式に正規化してから比較する
+  const normalizedDate = parseDateSafe_(date)
+    ? Utilities.formatDate(parseDateSafe_(date), "JST", "yyyy-MM-dd")
+    : String(date);
+  for (let i = 1; i < plData.length; i++) {
+    // F列(index5)がTRUEの行は取消済み → スキップ
+    if (plData[i][5] === true || plData[i][5] === "TRUE") continue;
+    const existId = plData[i][1].toString().replace(/^'/, "");
+    let existDate = "";
+    if (plData[i][3] instanceof Date) {
+      existDate = Utilities.formatDate(plData[i][3], "JST", "yyyy-MM-dd");
+    } else {
+      existDate = String(plData[i][3]);
+    }
+    if (existId === String(empId) && existDate === normalizedDate) {
+      return { success: false, kintoneSync: false, reason: "duplicate" };
+    }
+  }
+  // ▲ A3: 重複チェック ここまで ▲
+  
+  const now = new Date();
+  plSheet.appendRow([now, "'" + empId, empName, date, reason || "（記載なし）", "FALSE"]);
+  
+  // 追加した行のF列だけをチェックボックス化する
+  const lastRow = plSheet.getLastRow();
+  plSheet.getRange(lastRow, 6).insertCheckboxes();
+  
+  // 従業員マスタの「取得済日数（J列）」を+1する処理
+  const masterSheet = ss.getSheetByName('従業員マスタ');
+  if (masterSheet) {
+    const masterData = masterSheet.getDataRange().getValues();
+    const empIndex = buildEmpIndex_(masterData);
+    const found = empIndex[String(empId)];
+    if (found) {
+      const currentUsed = Number(found.data[M.USED]) || 0;
+      masterSheet.getRange(found.row, M.USED + 1).setValue(currentUsed + 1);
+    }
+  }
+  
+  // ▼▼ Kintoneアプリへのデータ連携処理（認証情報はスクリプトプロパティから取得） ▼▼
+  const props = PropertiesService.getScriptProperties();
+  const kintoneDomain = props.getProperty('KINTONE_DOMAIN');
+  const appId = Number(props.getProperty('KINTONE_APP_ID_PAID_LEAVE')) || 324;
+  const apiToken = props.getProperty('KINTONE_API_TOKEN');
+  let kintoneSync = false; // A1: Kintone連携の成否フラグ
+  
+  // 休暇日のフォーマット変換 (YYYY-MM-DD 形式で送る必要がある)
+  let kintoneDate = "";
+  if (date) {
+    const parsed = parseDateSafe_(date);
+    kintoneDate = parsed
+      ? Utilities.formatDate(parsed, "JST", "yyyy-MM-dd")
+      : date; // 変換できない場合はそのまま送る
+  }
+
+  const payload = {
+    app: appId,
+    record: {
+      "申請者名": { value: empName },
+      "開始日": { value: kintoneDate },
+      "終了日": { value: kintoneDate },
+      "R種別": { value: "休日(申請中)" },
+      "C終日": { value: ["終日"] },
+      "備考": { value: reason || "" }
+    }
+  };
+
+  const options = {
+    method: "post",
+    contentType: "application/json",
+    headers: {
+      "X-Cybozu-API-Token": apiToken
+    },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  };
+
+  try {
+    if (!kintoneDomain || !apiToken) {
+      console.warn("Kintone連携スキップ: スクリプトプロパティ(KINTONE_DOMAIN, KINTONE_API_TOKEN)が未設定です。setupScriptProperties() を実行してください。");
+    } else {
+      const response = UrlFetchApp.fetch(`https://${kintoneDomain}/k/v1/record.json`, options);
+      const responseCode = response.getResponseCode();
+      // Kintone APIのレスポンスコードを確認し、200以外はエラーとして記録する
+      if (responseCode !== 200) {
+        const errBody = response.getContentText();
+        console.error(`Kintone API Error: HTTP ${responseCode} - ${errBody}`);
+        // A1: Kintone連携失敗を管理者にメール通知
+        const adminEmail = props.getProperty('ADMIN_EMAIL');
+        if (adminEmail) {
+          MailApp.sendEmail(adminEmail,
+            `【要確認】有給申請のKintone連携失敗（${empName}）`,
+            `以下の有給申請はスプレッドシートに記録済みですが、Kintoneへの登録に失敗しました。\n\n` +
+            `従業員: ${empName} (ID: ${empId})\n` +
+            `取得希望日: ${date}\n` +
+            `エラー: HTTP ${responseCode}\n` +
+            `詳細: ${errBody}\n\n` +
+            `手動でKintoneアプリ324にレコードを追加してください。`);
+        }
+      } else {
+        const json = JSON.parse(response.getContentText());
+        if (json && json.id) {
+           plSheet.getRange(lastRow, 7).setValue(json.id);
+           kintoneSync = true; // 連携成功
+        }
+      }
+    }
+  } catch (e) {
+    console.error("Kintone API Error: " + e.message);
+    // A1: 例外発生時も管理者にメール通知
+    try {
+      const adminEmail = props.getProperty('ADMIN_EMAIL');
+      if (adminEmail) {
+        MailApp.sendEmail(adminEmail,
+          `【要確認】有給申請のKintone連携エラー（${empName}）`,
+          `以下の有給申請はスプレッドシートに記録済みですが、Kintone連携で例外が発生しました。\n\n` +
+          `従業員: ${empName} (ID: ${empId})\n` +
+          `取得希望日: ${date}\n` +
+          `エラー: ${e.message}\n\n` +
+          `手動でKintoneアプリ324にレコードを追加してください。`);
+      }
+    } catch (mailErr) {
+      console.error("管理者メール送信にも失敗: " + mailErr.message);
+    }
+  }
+  // ▲▲ Kintoneアプリへのデータ連携処理 ここまで ▲▲
+  
+  // A1: 戻り値をオブジェクトに変更（フロントエンド側でKintone同期結果を表示可能に）
+  return { success: true, kintoneSync: kintoneSync };
+}
+
+// ============================================
+// 有給休暇行の取消（日数戻し＆行削除）共通処理
+// ============================================
+function cancelPaidLeaveRow(ss, sheet, rowNum, empIdStr) {
+  const masterSheet = ss.getSheetByName('従業員マスタ');
+  if (masterSheet) {
+    const masterData = masterSheet.getDataRange().getValues();
+    // buildEmpIndex_でMap検索（シングルクォート除去にも対応）
+    const empIndex = buildEmpIndex_(masterData);
+    const cleanId = empIdStr.toString().replace(/^'/, "");
+    const found = empIndex[cleanId];
+    if (found) {
+      const currentUsed = Number(found.data[M.USED]) || 0;
+      // 取得済日数を -1 して戻す（0未満にはしない）
+      if (currentUsed > 0) {
+        masterSheet.getRange(found.row, M.USED + 1).setValue(currentUsed - 1);
+      }
+    }
+  }
+  // 有給申請の対象行を削除する
+  sheet.deleteRow(rowNum);
+}
+
+// ============================================
+// 手動取消ロジック (onEdit)
+// ============================================
+function onEdit(e) {
+  if (!e || !e.range) return;
+  const sheet = e.range.getSheet();
+  
+  // 有給休暇申請シートのF列(6列目)が編集された場合
+  if (sheet.getName() === "有給休暇申請" && e.range.getColumn() === 6) {
+    if (e.value === "TRUE") {
+      const rowNum = e.range.getRow();
+      if (rowNum === 1) return;
+      
+      const empId = sheet.getRange(rowNum, 2).getValue().toString();
+      if (!empId) return;
+
+      const ss = e.source;
+      cancelPaidLeaveRow(ss, sheet, rowNum, empId);
+      
+      try {
+         ss.toast(`${empId} の有給申請を否決（行削除）し、取得済日数を -1 に戻しました！`, "手動取消完了");
+      } catch(ex) {}
+    }
+  }
+}
+
+
+
+// ============================================
+// 有給休暇の自動管理システム (労働基準法準拠)
+// ============================================
+
+function onOpen() {
+  const ui = SpreadsheetApp.getUi();
+  ui.createMenu('集計・有給管理・その他ツール')
+    .addItem('集計結果CSVをダウンロード（月ごと）', 'showExportDialog')
+    .addSeparator()
+    .addItem('有給日数を一括最新化（手動更新）', 'updatePaidLeave')
+    .addItem('毎日の自動更新トリガーを作成', 'setupDailyTrigger')
+    .addSeparator()
+    .addItem('打刻ログを手動で退避＆古いデータ削除', 'archiveAndCleanupLogs')
+    .addItem('月次ログ退避トリガーを作成', 'setupMonthlyArchiveTrigger')
+    .addSeparator()
+    .addItem('打刻抜けアラートを手動実行', 'checkMissingPunches')
+    .addItem('打刻抜けアラートトリガーを作成', 'setupPunchAlertTrigger')
+    .addSeparator()
+    .addItem('打刻ログを手動で追加する', 'showManualLogDialog')
+    .addItem('打刻抜け行を赤くハイライト', 'highlightMissingPunches')
+    .addToUi();
+}
+
+function showExportDialog() {
+  const html = HtmlService.createHtmlOutputFromFile('ExportDialog')
+    .setWidth(360)
+    .setHeight(300);
+  SpreadsheetApp.getUi().showModalDialog(html, '勤怠データCSV出力');
+}
+
+/**
+ * 勤務種別に応じた定刻の開始・終了時間（分単位）を返す
+ */
+function getSchedule_(empType) {
+  switch (empType) {
+    case 2:  return { startMin: 18 * 60, endMin: 26 * 60 }; // 夜勤
+    case 3:  return { startMin:  9 * 60, endMin: 17 * 60 }; // パート等
+    default: return { startMin:  8 * 60, endMin: 17 * 60 }; // 種別1,4
+  }
+}
+
+/**
+ * 打刻イベント配列を「出勤〜退勤」のブロック配列に変換する
+ */
+function buildWorkBlocks_(events) {
+  const blocks = [];
+  let curBlock = null;
+  for (const e of events) {
+    if (e.action.startsWith('出勤')) {
+      if (curBlock) blocks.push(curBlock);
+      curBlock = { inT: e.time, outT: null, brks: [], lastBrk: null };
+    } else if (e.action.startsWith('退勤')) {
+      if (curBlock) {
+        curBlock.outT = e.time;
+        blocks.push(curBlock);
+        curBlock = null;
+      }
+    } else if (e.action === '外出') {
+      if (curBlock) curBlock.lastBrk = e.time;
+    } else if (e.action === '帰社') {
+      if (curBlock && curBlock.lastBrk) {
+        curBlock.brks.push({ s: curBlock.lastBrk, e: e.time });
+        curBlock.lastBrk = null;
+      }
+    }
+  }
+  if (curBlock) blocks.push(curBlock);
+  return blocks;
+}
+
+/**
+ * 集計結果の配列をCSV文字列に変換し、Base64エンコードして返す
+ */
+function buildCsvContent_(results) {
+  const csvRows = [];
+  csvRows.push(['従業員番号', '従業員名', '部門', '出勤日数', '実働時間', '普通残業時間', '深夜残業時間', '休日出勤日数', '休日勤務時間', '有給日数', '欠勤日数', '遅刻早退回数', '遅刻早退時間', '看護休暇日数', '介護休暇日数'].join(','));
+  for (const r of results) {
+    const escaped = r.map(cell => '"' + String(cell).replace(/"/g, '""') + '"');
+    csvRows.push(escaped.join(','));
+  }
+  const csvContent = "\uFEFF" + csvRows.join('\r\n');
+  return Utilities.base64Encode(Utilities.newBlob(csvContent).getBytes());
+}
+
+function generateAggregatedCSV(ymStr, closingType) {
+  const parts = ymStr.split('-');
+  const y = parseInt(parts[0], 10);
+  const m = parseInt(parts[1], 10) - 1; // 0-based month
+  
+  let startDate, endDate;
+  if (closingType === '25') {
+    startDate = new Date(y, m - 1, 26, 0, 0, 0); 
+    endDate = new Date(y, m, 25, 23, 59, 59); 
+  } else {
+    startDate = new Date(y, m, 1, 0, 0, 0); 
+    endDate = new Date(y, m + 1, 0, 23, 59, 59); 
+  }
+  
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  
+  // 1. カレンダー（共通関数で読み込み）
+  const { holidays1, holidays2 } = loadHolidays_(ss);
+  
+  // 2. マスタ読取
+  const masterSheet = ss.getSheetByName('従業員マスタ');
+  if (!masterSheet) return "";
+  const masterData = masterSheet.getDataRange().getValues();
+  const emps = []; 
+  const empById = {};
+  for (let i = 1; i < masterData.length; i++) {
+     const t = Number(masterData[i][M.WORK_TYPE]) || 0;
+     const empId = String(masterData[i][M.ID]);
+     const name = masterData[i][M.NAME];
+     if (closingType === '25' && !(t === 1 || t === 2 || t === 3)) continue;
+     if (closingType === '月末' && t !== 4) continue;
+     const emp = { id: empId, name: name, type: t };
+     emps.push(emp);
+     empById[empId] = emp;
+  }
+  
+  // 3. 有給休暇
+  const plSheet = ss.getSheetByName('有給休暇申請');
+  const paidLeavesStr = {};
+  if (plSheet) {
+    const data = plSheet.getDataRange().getValues();
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][5] === true || data[i][5] === "TRUE") continue; // 差戻
+      let d = data[i][3];
+      if (!d) continue;
+      let dStr = (d instanceof Date) ? Utilities.formatDate(d, "JST", "yyyy-MM-dd") : String(d);
+      paidLeavesStr[data[i][1].toString() + "_" + dStr] = true;
+    }
+  }
+  
+  // 3.5. 看護・介護休暇
+  const ncSheet = ss.getSheetByName('看護・介護休暇');
+  const nursingLeavesStr = {};
+  const careLeavesStr = {};
+  if (ncSheet) {
+    const ncData = ncSheet.getDataRange().getValues();
+    for (let i = 1; i < ncData.length; i++) {
+      let d = ncData[i][4];
+      if (!d) continue;
+      let dStr = (d instanceof Date) ? Utilities.formatDate(d, "JST", "yyyy-MM-dd") : String(d);
+      const eId = ncData[i][1].toString().replace(/^'/, "");
+      const lType = ncData[i][3];
+      if (lType === '看護休暇') nursingLeavesStr[eId + "_" + dStr] = true;
+      else if (lType === '介護休暇') careLeavesStr[eId + "_" + dStr] = true;
+    }
+  }
+  
+  // 4. 打刻ログ
+  const logSheet = ss.getSheetByName('打刻ログ');
+  const eventsByUser = {}; 
+  if (logSheet) {
+    const data = logSheet.getDataRange().getValues();
+    for (let i = 1; i < data.length; i++) {
+        const time = data[i][0];
+        const eId = data[i][1] ? String(data[i][1]) : '';
+        const action = data[i][4];
+        if (!time || !eId || !empById[eId]) continue;
+        const d = (time instanceof Date) ? time : new Date(time);
+        
+        // パディングを持たせて前後を少し広く読み取る（日またぎ対応）
+        if (d.getTime() < startDate.getTime() - 86400000 || d.getTime() > endDate.getTime() + 86400000) continue;
+        
+        if (!eventsByUser[eId]) eventsByUser[eId] = [];
+        eventsByUser[eId].push({ time: d, action: action });
+    }
+  }
+  
+  const getOverlap = (wS, wE, oS, oE) => {
+      let s = Math.max(wS, oS);
+      let e = Math.min(wE, oE);
+      return Math.max(0, (e - s) / 60000); 
+  };
+  
+  const results = [];
+  
+  for (let emp of emps) {
+     let evs = eventsByUser[emp.id] || [];
+     evs.sort((a,b) => a.time.getTime() - b.time.getTime());
+     
+     let totalDays = 0, realWork = 0, regOT = 0, nightOT = 0;
+     let holDays = 0, holWork = 0, lateCount = 0, lateTime = 0, absDays = 0;
+     
+     // ブロック分けをヘルパー関数で実行
+     const blocks = buildWorkBlocks_(evs);
+     
+     let workingDatesSeen = {};
+     let isType134 = (emp.type === 1 || emp.type === 3 || emp.type === 4);
+     
+     // 定刻をヘルパー関数から取得
+     const schedule = getSchedule_(emp.type);
+     const tScheduledStartMin = schedule.startMin;
+     const tScheduledEndMin = schedule.endMin;
+     
+     for (let b of blocks) {
+        if (!b.outT) continue;
+        const inJST = new Date(b.inT.toLocaleString("en-US", {timeZone: "Asia/Tokyo"}));
+        
+        let logYY = inJST.getFullYear();
+        let logMM = inJST.getMonth();
+        let logDD = inJST.getDate();
+        
+        // B4: 夜勤(種別2)の日またぎ補正
+        // 深夜0:00〜5:00の出勤打刻は前日の勤務として扱う
+        if (emp.type === 2 && inJST.getHours() < 5) {
+          const prevDay = new Date(inJST.getTime() - 86400000);
+          logYY = prevDay.getFullYear();
+          logMM = prevDay.getMonth();
+          logDD = prevDay.getDate();
+        }
+        
+        let logicalDate = new Date(logYY, logMM, logDD);
+        
+        // 月次期間の判定
+        if (logicalDate.getTime() < startDate.getTime() || logicalDate.getTime() > endDate.getTime()) {
+           continue; 
+        }
+        
+        let dStr = Utilities.formatDate(logicalDate, "JST", "yyyy-MM-dd");
+        workingDatesSeen[dStr] = true;
+        
+        let isHoliday = (emp.type === 3) ? !!holidays2[dStr] : !!holidays1[dStr];
+        
+        let midNight = logicalDate.getTime();
+        let sStart = midNight + tScheduledStartMin * 60000;
+        let sEnd   = midNight + tScheduledEndMin * 60000;
+        let nightThresh = midNight + 22 * 60 * 60000;
+        let fixBrkS = midNight + 12 * 60 * 60000;
+        let fixBrkE = midNight + 13 * 60 * 60000;
+        
+        let inMS = b.inT.getTime();
+        let outMS = b.outT.getTime();
+        
+        // 休憩控除ロジック（重なり分のみ）
+        let getManualBrkSum = (wS, wE) => {
+           let sum = 0;
+           for (let brk of b.brks) sum += getOverlap(wS, wE, brk.s.getTime(), brk.e.getTime());
+           return sum;
+        };
+        
+        // 休日出勤
+        if (isHoliday) {
+            holDays++;
+            totalDays++; // 休日勤務日数を出勤日数に加算
+            let adjustedIn = Math.max(inMS, sStart); // 休日も早出カット
+            let w = Math.max(0, outMS - adjustedIn) / 60000;
+            // 休日の定刻跨ぎでも原則・固定＆手動を控除
+            let bF = isType134 ? getOverlap(adjustedIn, outMS, fixBrkS, fixBrkE) : 0;
+            let bM = getManualBrkSum(adjustedIn, outMS);
+            holWork += Math.max(0, w - bF - bM);
+            continue;
+        }
+        
+        // 基本勤務
+        totalDays++;
+        
+        // 早出は切り捨て
+        let adjustedIn = Math.max(inMS, sStart); 
+        // 修正: 実働時間は定刻終了時間を上限とする（残業分を含まない）
+        let adjustedOut = Math.min(outMS, sEnd);
+        
+        let workedMins = Math.max(0, adjustedOut - adjustedIn) / 60000;
+        // 定刻内の労働時間から休憩を控除
+        let bF = isType134 ? getOverlap(adjustedIn, adjustedOut, fixBrkS, fixBrkE) : 0;
+        let bM = getManualBrkSum(adjustedIn, adjustedOut);
+        
+        realWork += Math.max(0, workedMins - bF - bM);
+        
+        // 遅刻カウント (定刻より遅い)
+        if (inMS > sStart) {
+           lateTime += (inMS - sStart) / 60000;
+           lateCount++;
+        }
+        // 早退カウント (定刻修了より早い)
+        if (outMS < sEnd) {
+           lateTime += (sEnd - outMS) / 60000;
+           lateCount++;
+        }
+        // 外出がある場合も遅刻早退回数へ足す
+        if (b.brks.length > 0) {
+            lateCount += b.brks.length;
+            lateTime += bM;
+        }
+        
+        // 普通残業と深夜残業
+        if (emp.type === 2) { 
+            // 種別2: 深夜割増ナシ、2時以降はすべて普通残業
+            let baseOT = Math.max(0, outMS - sEnd) / 60000;
+            let bpOT = getManualBrkSum(Math.max(adjustedIn, sEnd), outMS);
+            regOT += Math.max(0, baseOT - bpOT);
+        } else {
+            // 種別1, 3, 4: 17:00以降を普通残業とし、22時またぎを深夜残業へ分割
+            let regOTMins = getOverlap(sEnd, nightThresh, adjustedIn, outMS);
+            let bpReg = getManualBrkSum(Math.max(adjustedIn, sEnd), Math.min(nightThresh, outMS));
+            regOT += Math.max(0, regOTMins - bpReg);
+            
+            let nOTMins = getOverlap(nightThresh, outMS + 86400000, adjustedIn, outMS);
+            let bpNight = getManualBrkSum(Math.max(adjustedIn, nightThresh), outMS);
+            nightOT += Math.max(0, nOTMins - bpNight);
+        }
+     }
+     
+     // 有給日数・欠勤日数の集計
+     let paidLeaveCount = 0;
+     let nursingLeaveCount = 0;
+     let careLeaveCount = 0;
+     let todayTime = new Date().getTime();
+     for (let ts = startDate.getTime(); ts <= endDate.getTime(); ts += 86400000) {
+         let dDate = new Date(ts);
+         let dStr = Utilities.formatDate(dDate, "JST", "yyyy-MM-dd");
+         if (paidLeavesStr[emp.id + "_" + dStr]) {
+            paidLeaveCount++;
+            continue;
+          if (nursingLeavesStr[emp.id + "_" + dStr]) {
+            nursingLeaveCount++;
+          }
+          if (careLeavesStr[emp.id + "_" + dStr]) {
+            careLeaveCount++;
+          }
+         }
+         if (dDate.getTime() > todayTime) continue; // 未来日は欠勤にしない
+         let isHoliday = (emp.type === 3) ? holidays2[dStr] : holidays1[dStr];
+         if (!isHoliday && !workingDatesSeen[dStr]) {
+             absDays++;
+         }
+     }
+     
+     // 部門修正: 1, 2, 3 は "浅見工業株式会社"、4 は "株式会社アサミ"
+     let dept = (emp.type === 4) ? "株式会社アサミ" : "浅見工業株式会社";
+     const f = (val) => (val / 60).toFixed(2);
+     
+     results.push([
+        emp.id, emp.name, dept, 
+        totalDays, f(realWork), f(regOT), f(nightOT), 
+        holDays, f(holWork), paidLeaveCount, absDays, lateCount, f(lateTime), nursingLeaveCount, careLeaveCount
+     ]);
+  }
+  
+  // CSV構築をヘルパー関数で実行
+  return buildCsvContent_(results);
+}
+
+function setupDailyTrigger() {
+  // すでに同じトリガーがある場合は重複を防ぐために一扫する
+  const triggers = ScriptApp.getProjectTriggers();
+  triggers.forEach(t => {
+    if (t.getHandlerFunction() === 'updatePaidLeave') {
+      ScriptApp.deleteTrigger(t);
+    }
+  });
+  
+  // 毎日 深夜1時〜2時の間に自動実行する設定
+  ScriptApp.newTrigger('updatePaidLeave')
+    .timeBased()
+    .everyDays(1)
+    .atHour(1)
+    .create();
+    
+  SpreadsheetApp.getUi().alert("毎晩 深夜1時 に有給を自動更新する設定が完了しました！\n（PCやスプレッドシートを閉じていてもクラウド上で実行されます）");
+}
+
+function updatePaidLeave() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName('従業員マスタ');
+  if (!sheet) return;
+
+  const data = sheet.getDataRange().getValues();
+  // 今日の日付 (JST)
+  const now = new Date(new Date().toLocaleString("en-US", {timeZone: "Asia/Tokyo"}));
+  const todayStr = Utilities.formatDate(now, "JST", "yyyy/MM/dd");
+
+  let modifiedCount = 0;
+
+  for (let i = 1; i < data.length; i++) {
+    const hireDateValue = data[i][M.HIRE_DATE]; // L列: 入社日
+    if (!hireDateValue || !(hireDateValue instanceof Date)) continue;
+
+    let hireDate = new Date(hireDateValue.toLocaleString("en-US", {timeZone: "Asia/Tokyo"}));
+    
+    let isGrantDay = false;
+    let newLegalDays = 0;
+    
+    // (1) 入社から半年後の計算
+    let d = new Date(hireDate.getTime());
+    d.setMonth(d.getMonth() + 6);
+    
+    // 今日が「初回の付与日」か判定
+    if (Utilities.formatDate(d, "JST", "yyyy/MM/dd") === todayStr) {
+        isGrantDay = true;
+        newLegalDays = 10;
+    }
+    
+    // 初期セットアップ時の「今の勤続年数なら何日付与されているべきか」算出用
+    let maxGrantedSoFar = 0;
+    if (now >= d) maxGrantedSoFar = 10;
+    
+    // (2) 1.5年以降 (50年分まで対応)
+    for (let y = 1; y <= 50; y++) {
+        let anny = new Date(d.getTime());
+        anny.setFullYear(anny.getFullYear() + y);
+        
+        // 法定付与日数をテーブルから取得
+        let days = getLegalPaidLeaveDays_(y);
+
+        if (now >= anny) {
+            maxGrantedSoFar = days;
+        }
+
+        // 今日が「1年ごとの付与日」か判定
+        if (Utilities.formatDate(anny, "JST", "yyyy/MM/dd") === todayStr) {
+            isGrantDay = true;
+            newLegalDays = days;
+            break;
+        }
+    }
+    
+    const currentGranted = data[i][M.GRANTED]; // H列: 総付与日数
+    
+    // ==========================================
+    // 【A】本日が何らかの付与日であれば、有給の付与＆繰越処理を実行
+    // ==========================================
+    if (isGrantDay) {
+        let prevGranted = Number(currentGranted) || 0;
+        let prevCarried = Number(data[i][M.CARRIED]) || 0; // I列: 繰越日数
+        let prevUsed    = Number(data[i][M.USED]) || 0; // J列: 取得済日数
+        
+        // 前年度の残日数
+        let remaining = prevGranted + prevCarried - prevUsed;
+        if (remaining < 0) remaining = 0;
+        
+        // 残日数を「今年の繰越」に回す（※労基法の2年時効により、さらに1年前の繰越分は消滅。つまり前年度付与分だけが残る）
+        let newCarried = remaining;
+        if (newCarried > prevGranted) {
+           newCarried = prevGranted;
+        }
+        
+        // スプレッドシートへ書き込み (1-indexed 配列のため 行番号は i+1)
+        sheet.getRange(i + 1, M.GRANTED + 1).setValue(newLegalDays); // H列: 今年の新たな総付与
+        sheet.getRange(i + 1, M.CARRIED + 1).setValue(newCarried);   // I列: 繰越日数
+        sheet.getRange(i + 1, M.USED + 1).setValue(0);              // J列: 取得済日数をゼロにリセット
+        sheet.getRange(i + 1, M.NURSING_USED + 1).setValue(0);       // O列: 看護休暇取得済をリセット
+        sheet.getRange(i + 1, M.CARE_USED + 1).setValue(0);         // P列: 介護休暇取得済をリセット
+        modifiedCount++;
+    } 
+    // ==========================================
+    // 【B】過去に一度も総付与日数が入力されていない場合（システムの初期導入時）
+    // ==========================================
+    else if (currentGranted === "" || currentGranted == null) {
+        if (maxGrantedSoFar > 0) {
+            // 現在の勤続年数に応じた正しい総付与日数をセットする
+            sheet.getRange(i + 1, M.GRANTED + 1).setValue(maxGrantedSoFar);
+            // ※取得済・繰り越しはユーザー自身が手動で過去データを入力するため、あえて0リセットしない
+        }
+    }
+  }
+
+  // ==========================================
+  // 【C】K列（有給残日数）に数式を一括セット（A4: R1C1形式で明示的な相対参照）
+  // ==========================================
+  // 管理者が手動でJ列の「取得済日数」を打った瞬間に、画面上ですぐにK列の有給残日数が減るように関数式を入れる
+  // R1C1形式: RC[-3](=H列) + RC[-2](=I列) - RC[-1](=J列) → 各行で正しい行番号を自動参照
+  const lastRow = sheet.getLastRow();
+  if (lastRow > 1) {
+    const kRange = sheet.getRange(2, M.REMAINING + 1, lastRow - 1); 
+    kRange.setFormulaR1C1('=RC[-3]+RC[-2]-RC[-1]');
+  }
+  
+  try {
+     SpreadsheetApp.getActiveSpreadsheet().toast(`処理が完了しました！\n本日、新たに有給がリセット＆付与された人数: ${modifiedCount}名`, "完了");
+  } catch(e) {} // サーバーからの時間駆動トリガー時はtoastが使えないため無視
+}
+
+// ============================================
+// スクリプトプロパティの初期設定（初回のみ実行）
+// GASエディタから手動で1回だけ実行してください
+// ============================================
+function setupScriptProperties() {
+  const props = PropertiesService.getScriptProperties();
+  
+  // 既存の値がある場合は上書きしない（安全策）
+  const defaults = {
+    'KINTONE_DOMAIN': 'asamikogyo.cybozu.com',
+    'KINTONE_API_TOKEN': '★ここにAPIトークンを入力★',
+    'KINTONE_APP_ID_PAID_LEAVE': '324',
+    'ADMIN_EMAIL': 'admin@asami-k.co.jp'
+  };
+  
+  let setCount = 0;
+  for (const [key, defaultValue] of Object.entries(defaults)) {
+    const existing = props.getProperty(key);
+    if (!existing) {
+      props.setProperty(key, defaultValue);
+      setCount++;
+    }
+  }
+  
+  // 現在のプロパティ一覧を表示（トークンは先頭5文字だけマスク表示）
+  const all = props.getProperties();
+  let summary = "【スクリプトプロパティの現在値】\n";
+  for (const [k, v] of Object.entries(all)) {
+    if (k.includes('TOKEN') || k.includes('SECRET')) {
+      summary += `  ${k} = ${v.substring(0, 5)}${'*'.repeat(Math.max(0, v.length - 5))}\n`;
+    } else {
+      summary += `  ${k} = ${v}\n`;
+    }
+  }
+  summary += `\n新規設定: ${setCount}件`;
+  
+  // Logger.log に必ず出力（GASエディタの「実行ログ」で確認可能）
+  Logger.log(summary);
+  
+  // UIダイアログは、スプレッドシートが開いている場合のみ表示（開いていないとハングするため）
+  try {
+    SpreadsheetApp.getUi().alert('スクリプトプロパティ設定完了', summary, SpreadsheetApp.getUi().ButtonSet.OK);
+  } catch(e) {
+    // GASエディタ単体から実行した場合はUI不可 → ログのみで完了
+    Logger.log("（UIダイアログは表示できませんでした。上記ログで結果を確認してください）");
+  }
+}
+
+// ============================================
+// B-New1: 打刻ログの月次退避 & 古いデータの自動削除
+// ============================================
+
+/**
+ * 前月分の打刻ログをCSVとしてGoogle Driveに保存し、
+ * 2ヶ月前より古いデータを打刻ログシートから削除する。
+ * 毎月初日に自動実行、またはメニューから手動実行可能。
+ */
+function archiveAndCleanupLogs() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const logSheet = ss.getSheetByName('打刻ログ');
+  if (!logSheet) {
+    console.warn('archiveAndCleanupLogs: 打刻ログシートが見つかりません。');
+    return;
+  }
+  
+  const now = new Date();
+  const data = logSheet.getDataRange().getValues();
+  const headers = data[0]; // ヘッダー行
+  
+  // --- 1. 前月の範囲を算出 ---
+  const prevMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1, 0, 0, 0);
+  const prevMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
+  const prevYM = Utilities.formatDate(prevMonthStart, "JST", "yyyy-MM");
+  
+  // --- 2. 前月分のデータを抽出 ---
+  const archiveRows = [];
+  for (let i = 1; i < data.length; i++) {
+    const d = (data[i][0] instanceof Date) ? data[i][0] : new Date(data[i][0]);
+    if (isNaN(d.getTime())) continue;
+    if (d >= prevMonthStart && d <= prevMonthEnd) {
+      archiveRows.push(data[i]);
+    }
+  }
+  
+  // --- 3. アーカイブフォルダをスプレッドシートと同じフォルダ内に準備 ---
+  const folderName = '打刻ログアーカイブ';
+  const ssFile = DriveApp.getFileById(ss.getId());
+  const parentFolder = ssFile.getParents().next();
+  let archiveFolder;
+  const subFolders = parentFolder.getFoldersByName(folderName);
+  if (subFolders.hasNext()) {
+    archiveFolder = subFolders.next();
+  } else {
+    archiveFolder = parentFolder.createFolder(folderName);
+  }
+  
+  // --- 4. CSV化してGoogle Driveに保存 ---
+  let archivedCount = 0;
+  if (archiveRows.length > 0) {
+    const csvLines = [];
+    // ヘッダー
+    csvLines.push(headers.map(h => '"' + String(h).replace(/"/g, '""') + '"').join(','));
+    // データ行
+    for (const row of archiveRows) {
+      const cells = row.map((cell, ci) => {
+        if (ci === 0 && cell instanceof Date) {
+          return '"' + Utilities.formatDate(cell, "JST", "yyyy/MM/dd HH:mm:ss") + '"';
+        }
+        return '"' + String(cell).replace(/"/g, '""') + '"';
+      });
+      csvLines.push(cells.join(','));
+    }
+    const csvContent = "\uFEFF" + csvLines.join('\r\n');
+    const fileName = `打刻ログ_${prevYM}.csv`;
+    archiveFolder.createFile(fileName, csvContent, MimeType.CSV);
+    archivedCount = archiveRows.length;
+  }
+  
+  // --- 5. 2ヶ月前より古いデータを削除 ---
+  //   例: 4月実行時 → cutoffDate = 2月初日 → 1月以前のデータを削除
+  const cutoffDate = new Date(now.getFullYear(), now.getMonth() - 2, 1, 0, 0, 0);
+  let deletedCount = 0;
+  // 下から上へ走査して削除（行番号がズレないように）
+  for (let i = data.length - 1; i >= 1; i--) {
+    const d = (data[i][0] instanceof Date) ? data[i][0] : new Date(data[i][0]);
+    if (isNaN(d.getTime())) continue;
+    if (d < cutoffDate) {
+      logSheet.deleteRow(i + 1); // シートの行番号は1-indexed
+      deletedCount++;
+    }
+  }
+  
+  // --- 6. 結果通知 ---
+  const cutoffStr = Utilities.formatDate(cutoffDate, "JST", "yyyy/MM/dd");
+  const summaryMsg = `ログ退避完了！\n` +
+    `・前月(${prevYM})のアーカイブ: ${archivedCount}件 → Google Drive「打刻ログアーカイブ」フォルダに保存\n` +
+    `・${cutoffStr}より前の古いデータ削除: ${deletedCount}件`;
+  
+  console.log(summaryMsg);
+  
+  // 管理者にメール通知
+  try {
+    const adminEmail = PropertiesService.getScriptProperties().getProperty('ADMIN_EMAIL');
+    if (adminEmail) {
+      MailApp.sendEmail(adminEmail,
+        `【完了】打刻ログ月次退避 (${prevYM})`,
+        summaryMsg);
+    }
+  } catch (e) {}
+  
+  // UIからの手動実行時はtoastでも通知
+  try {
+    ss.toast(summaryMsg, 'ログ退避完了', 10);
+  } catch (e) {}
+}
+
+/**
+ * 毎月1日の深夜2時に archiveAndCleanupLogs() を自動実行するトリガーを作成する。
+ */
+function setupMonthlyArchiveTrigger() {
+  // 既存の同名トリガーを削除（重複防止）
+  const triggers = ScriptApp.getProjectTriggers();
+  triggers.forEach(t => {
+    if (t.getHandlerFunction() === 'archiveAndCleanupLogs') {
+      ScriptApp.deleteTrigger(t);
+    }
+  });
+  
+  // 毎月1日の深夜2時に実行
+  ScriptApp.newTrigger('archiveAndCleanupLogs')
+    .timeBased()
+    .onMonthDay(1)
+    .atHour(2)
+    .create();
+    
+  try {
+    SpreadsheetApp.getUi().alert('毎月 1日 深夜2時 に打刻ログを自動退避する設定が完了しました！\n\n・前月分のCSVをGoogle Drive「打刻ログアーカイブ」フォルダに保存\n・2ヶ月前より古いデータを自動削除');
+  } catch (e) {}
+}
+
+// ============================================
+// B-New2: 打刻抜け・打刻ミスの自動アラート通知
+// ============================================
+
+/**
+ * 本日の出勤打刻抜け、および前日の退勤打刻抜けを検知し、管理者にメール通知する。
+ * ・休日と有給申請済みの日はスキップ
+ * ・勤務種別ごとの定刻に応じた判定
+ */
+function checkMissingPunches() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const now = new Date();
+  const todayStr = Utilities.formatDate(now, "JST", "yyyy-MM-dd");
+  const todayDisp = Utilities.formatDate(now, "JST", "yyyy/MM/dd");
+  
+  // 前日（退勤チェック用）
+  const yesterday = new Date(now.getTime() - 86400000);
+  const yesterdayStr = Utilities.formatDate(yesterday, "JST", "yyyy-MM-dd");
+  const yesterdayDisp = Utilities.formatDate(yesterday, "JST", "yyyy/MM/dd");
+  
+  // 1. カレンダー → 休日判定
+  const { holidays1, holidays2 } = loadHolidays_(ss);
+  
+  // 2. 有給休暇申請を取得（本日+前日）
+  const plSheet = ss.getSheetByName('有給休暇申請');
+  const paidLeaveSet = {};
+  if (plSheet) {
+    const plData = plSheet.getDataRange().getValues();
+    for (let i = 1; i < plData.length; i++) {
+      if (plData[i][5] === true || plData[i][5] === "TRUE") continue;
+      let d = plData[i][3];
+      if (!d) continue;
+      let dStr = (d instanceof Date) ? Utilities.formatDate(d, "JST", "yyyy-MM-dd") : String(d);
+      const empId = plData[i][1].toString().replace(/^'/, "");
+      paidLeaveSet[empId + "_" + dStr] = true;
+    }
+  }
+  
+  // 3. 従業員マスタを取得
+  const masterSheet = ss.getSheetByName('従業員マスタ');
+  if (!masterSheet) return;
+  const masterData = masterSheet.getDataRange().getValues();
+  
+  // 4. 打刻ログから本日・前日の打刻を抽出
+  const logSheet = ss.getSheetByName('打刻ログ');
+  const todayLogs = {};    // { empId: { 出勤: true, 退勤: true } }
+  const yesterdayLogs = {}; // { empId: { 出勤: true, 退勤: true } }
+  if (logSheet) {
+    const logData = logSheet.getDataRange().getValues();
+    for (let i = 1; i < logData.length; i++) {
+      const t = (logData[i][0] instanceof Date) ? logData[i][0] : new Date(logData[i][0]);
+      if (isNaN(t.getTime())) continue;
+      const logDateStr = Utilities.formatDate(t, "JST", "yyyy-MM-dd");
+      const eId = String(logData[i][1]);
+      const action = logData[i][4];
+      
+      if (logDateStr === todayStr) {
+        if (!todayLogs[eId]) todayLogs[eId] = {};
+        if (action.startsWith('出勤')) todayLogs[eId].出勤 = true;
+        if (action.startsWith('退勤')) todayLogs[eId].退勤 = true;
+      }
+      if (logDateStr === yesterdayStr) {
+        if (!yesterdayLogs[eId]) yesterdayLogs[eId] = {};
+        if (action.startsWith('出勤')) yesterdayLogs[eId].出勤 = true;
+        if (action.startsWith('退勤')) yesterdayLogs[eId].退勤 = true;
+      }
+    }
+  }
+  
+  // 5. 各従業員の打刻欠如をチェック
+  const missingClockIn = [];  // 本日の出勤抜け
+  const missingClockOut = []; // 前日の退勤抜け
+  
+  for (let i = 1; i < masterData.length; i++) {
+    const empId = String(masterData[i][M.ID]);
+    const empName = masterData[i][M.NAME];
+    const empType = Number(masterData[i][M.WORK_TYPE]) || 0;
+    
+    // 勤務種別ごとの定刻を取得
+    const schedule = getSchedule_(empType);
+    const scheduledHour = Math.floor(schedule.startMin / 60);
+    const scheduledMinStr = String(schedule.startMin % 60).padStart(2, '0');
+    const typeLabel = empType === 2 ? '夜勤' : empType === 3 ? 'パート' : '一般';
+    
+    // --- 本日の出勤チェック ---
+    const isTodayHoliday = (empType === 3) ? !!holidays2[todayStr] : !!holidays1[todayStr];
+    const hasTodayPaidLeave = !!paidLeaveSet[empId + "_" + todayStr];
+    
+    if (!isTodayHoliday && !hasTodayPaidLeave) {
+      // 現在時刻が定刻+1時間を過ぎているか確認
+      const checkHour = scheduledHour + 1;
+      const currentHour = now.getHours();
+      if (currentHour >= checkHour) {
+        if (!todayLogs[empId] || !todayLogs[empId].出勤) {
+          missingClockIn.push(`  ${empId} ${empName}（${typeLabel} / 定刻 ${scheduledHour}:${scheduledMinStr}）`);
+        }
+      }
+    }
+    
+    // --- 前日の退勤チェック ---
+    const isYesterdayHoliday = (empType === 3) ? !!holidays2[yesterdayStr] : !!holidays1[yesterdayStr];
+    const hasYesterdayPaidLeave = !!paidLeaveSet[empId + "_" + yesterdayStr];
+    
+    if (!isYesterdayHoliday && !hasYesterdayPaidLeave) {
+      if (yesterdayLogs[empId] && yesterdayLogs[empId].出勤 && !yesterdayLogs[empId].退勤) {
+        missingClockOut.push(`  ${empId} ${empName}（${typeLabel} / 出勤あり → 退勤記録なし）`);
+      }
+    }
+  }
+  
+  // 6. 通知
+  if (missingClockIn.length === 0 && missingClockOut.length === 0) {
+    console.log('打刻抜けアラート: 異常なし');
+    try { ss.toast('打刻抜けは検知されませんでした。', 'アラートチェック完了'); } catch(e) {}
+    return;
+  }
+  
+  const totalMissing = missingClockIn.length + missingClockOut.length;
+  let body = `以下の従業員の打刻記録に問題があります。\n\n`;
+  
+  if (missingClockIn.length > 0) {
+    body += `■ 本日(${todayDisp})の出勤打刻なし:  ${missingClockIn.length}名\n`;
+    body += missingClockIn.join('\n') + '\n\n';
+  }
+  if (missingClockOut.length > 0) {
+    body += `■ 前日(${yesterdayDisp})の退勤打刻なし:  ${missingClockOut.length}名\n`;
+    body += missingClockOut.join('\n') + '\n';
+  }
+  
+  const subject = `【打刻アラート】${todayDisp} 打刻抜け検知 (${totalMissing}名)`;
+  
+  try {
+    const adminEmail = PropertiesService.getScriptProperties().getProperty('ADMIN_EMAIL');
+    if (adminEmail) {
+      MailApp.sendEmail(adminEmail, subject, body);
+    }
+  } catch (e) {
+    console.error('打刻アラートメール送信失敗: ' + e.message);
+  }
+  
+  console.log(subject + '\n' + body);
+  try { ss.toast(subject, '打刻抜け検知', 10); } catch(e) {}
+}
+
+/**
+ * 打刻抜けアラートのトリガーを作成する。
+ * 勤務種別ごとの定刻+1時間後にチェックするため、
+ * 毎日9時（種別1,4の定刻8:00+1h）・10時（種別3の定刻9:00+1h）・19時（種別2の定刻18:00+1h）に実行。
+ */
+function setupPunchAlertTrigger() {
+  // 既存の同名トリガーを削除（重複防止）
+  const triggers = ScriptApp.getProjectTriggers();
+  triggers.forEach(t => {
+    if (t.getHandlerFunction() === 'checkMissingPunches') {
+      ScriptApp.deleteTrigger(t);
+    }
+  });
+  
+  // 9:00 — 種別1,4 の出勤チェック (定刻8:00 + 1h)
+  ScriptApp.newTrigger('checkMissingPunches')
+    .timeBased()
+    .everyDays(1)
+    .atHour(9)
+    .create();
+  
+  // 10:00 — 種別3 の出勤チェック (定刻9:00 + 1h) + 種別1,4の退勤チェックも兼ねる
+  ScriptApp.newTrigger('checkMissingPunches')
+    .timeBased()
+    .everyDays(1)
+    .atHour(10)
+    .create();
+  
+  // 19:00 — 種別2(夜勤) の出勤チェック (定刻18:00 + 1h)
+  ScriptApp.newTrigger('checkMissingPunches')
+    .timeBased()
+    .everyDays(1)
+    .atHour(19)
+    .create();
+    
+  try {
+    SpreadsheetApp.getUi().alert('打刻抜けアラートのトリガーが作成されました！\n\n' +
+      '・毎日 9:00 — 種別1,4（定刻8:00）の出勤チェック\n' +
+      '・毎日 10:00 — 種別3（定刻9:00）の出勤チェック + 前日退勤チェック\n' +
+      '・毎日 19:00 — 種別2（夜勤 定刻18:00）の出勤チェック');
+  } catch (e) {}
+}
+
+// ============================================
+// 年次リマインダー: 小3以下の子・要介護家族の確認依頼メール
+// トリガー設定: 毎年3月31日に実行
+// ============================================
+function sendAnnualNursingCareReminder() {
+  // 3月31日以外は何もしない（日次トリガーで毎日呼び出し、3/31のみ実行）
+  const today = new Date();
+  if (today.getMonth() !== 2 || today.getDate() !== 31) return;
+
+  const adminEmail = "admin@asami-k.co.jp";
+  const subject = "【要対応】従業員マスタ更新のお願い（看護・介護休暇）";
+  const body = [
+    "管理者各位",
+    "",
+    "新年度（4月1日〜）に向けて、従業員マスタの以下項目の確認・更新をお願いします。",
+    "",
+    "■ 確認項目",
+    "1. 小3以下の子の人数（M列）",
+    "   → 各従業員に小学校3年生修了まで（9歳到達後最初の3月31日まで）の子がいるか確認してください。",
+    "   → 進級・卒業により対象外となる子がいる場合は人数を減らしてください。",
+    "   → 新たに出生した子がいる場合は人数を増やしてください。",
+    "",
+    "2. 要介護家族の人数（N列）",
+    "   → 要介護状態の家族の有無に変更がないか確認してください。",
+    "",
+    "■ 更新方法",
+    "スプレッドシート「従業員マスタ」のM列（小3以下の子の人数）およびN列（要介護家族の人数）を直接編集してください。",
+    "",
+    "■ 注意事項",
+    "・O列（看護休暇取得済）とP列（介護休暇取得済）は有給起算日に自動リセットされるため、手動変更は不要です。",
+    "・人数が0の従業員は該当する休暇を申請できません。",
+    "",
+    "※ このメールは勤怠管理システムから自動送信されています。",
+  ].join("\n");
+  
+  MailApp.sendEmail(adminEmail, subject, body);
+  console.log("年次リマインダーメール送信完了: " + adminEmail);
+}
+
+
+
+// ============================================
+// 謇灘綾繝ｭ繧ｰ謇句虚霑ｽ蜉讖溯・
+// ============================================
+function showManualLogDialog() {
+  const html = HtmlService.createHtmlOutputFromFile('ManualLogDialog')
+    .setWidth(400)
+    .setHeight(480);
+  SpreadsheetApp.getUi().showModalDialog(html, '謇灘綾繝ｭ繧ｰ謇句虚霑ｽ蜉');
+}
+
+function getEmployeeListForDialog() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const masterSheet = ss.getSheetByName('蠕捺･ｭ蜩｡繝槭せ繧ｿ');
+  if (!masterSheet) return [];
+  const masterData = masterSheet.getDataRange().getValues();
+  const emps = [];
+  for (let i = 1; i < masterData.length; i++) {
+    const id = String(masterData[i][M.ID]);
+    if (id && id.trim() !== '') {
+      emps.push({
+        id: id,
+        name: String(masterData[i][M.NAME]),
+        type: Number(masterData[i][M.WORK_TYPE]) || 0
+      });
+    }
+  }
+  return emps;
+}
+
+function addManualLog(data) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const logSheet = ss.getSheetByName('謇灘綾繝ｭ繧ｰ');
+    if (!logSheet) return { success: false, error: '謇灘綾繝ｭ繧ｰ繧ｷ繝ｼ繝医′隕九▽縺九ｊ縺ｾ縺帙ｓ' };
+
+    const dateStr = data.dateStr; // yyyy-mm-dd
+    const timeStr = data.timeStr; // hh:mm
+    const dateObj = new Date(`${dateStr}T${timeStr}:00`);
+
+    // A蛻暦ｼ医ち繧､繝繧ｹ繧ｿ繝ｳ繝暦ｼ峨・蜃ｦ逅・    const lastRow = logSheet.getLastRow() + 1;
+    const range = logSheet.getRange(lastRow, 1, 1, 5);
+    range.setNumberFormat("@"); // 蜈ｨ繧ｻ繝ｫ繝・く繧ｹ繝・    range.setValues([[dateObj, data.empId, data.empName, data.workType, data.type]]);
+    // A蛻励□縺第律譎よ嶌蠑上↓謌ｻ縺・    logSheet.getRange(lastRow, 1).setNumberFormat("yyyy/MM/dd HH:mm:ss");
+
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+// ============================================
+// 謇灘綾謚懊￠陦後・繝上う繝ｩ繧､繝域ｩ溯・
+// ============================================
+function highlightMissingPunches() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const logSheet = ss.getSheetByName('謇灘綾繝ｭ繧ｰ');
+  if (!logSheet) {
+    SpreadsheetApp.getUi().alert('縲梧遠蛻ｻ繝ｭ繧ｰ縲阪す繝ｼ繝医′隕九▽縺九ｊ縺ｾ縺帙ｓ縲・);
+    return;
+  }
+  
+  const data = logSheet.getDataRange().getValues();
+  if (data.length <= 1) return;
+  
+  // 譌･莉倥・蠕捺･ｭ蜩｡縺斐→縺ｫ繧､繝吶Φ繝医ｒ髮・ｨ・  const logsMap = {}; 
+
+  for (let i = 1; i < data.length; i++) {
+    const time = data[i][0];
+    const eId = String(data[i][1]);
+    const action = String(data[i][4]);
+    if (!time || !eId) continue;
+    
+    let d = (time instanceof Date) ? time : new Date(time);
+    if (isNaN(d.getTime())) continue;
+    
+    let logYY = d.getFullYear();
+    let logMM = d.getMonth();
+    let logDD = d.getDate();
+    let dateKey = `${logYY}-${String(logMM+1).padStart(2,'0')}-${String(logDD).padStart(2,'0')}`;
+    let key = `${eId}_${dateKey}`;
+    
+    if (!logsMap[key]) {
+      logsMap[key] = { inTotal: 0, outTotal: 0, rows: [] };
+    }
+    
+    logsMap[key].rows.push(i);
+    
+    if (action.startsWith('蜃ｺ蜍､')) logsMap[key].inTotal++;
+    if (action.startsWith('騾蜍､')) logsMap[key].outTotal++;
+  }
+  
+  // 襍､縺丞｡励ｊ縺､縺ｶ縺呵｡後・蛻､螳・  const errorRows = new Set();
+  const todayStr = Utilities.formatDate(new Date(), "JST", "yyyy-MM-dd");
+
+  for (const key in logsMap) {
+    const logInfo = logsMap[key];
+    const [empId, dateKey] = key.split('_');
+    
+    if (logInfo.inTotal !== logInfo.outTotal) {
+      if (dateKey === todayStr && logInfo.inTotal > logInfo.outTotal) {
+        continue;
+      }
+      logInfo.rows.forEach(r => errorRows.add(r));
+    }
+  }
+  
+  const numRows = data.length;
+  const numCols = data[0].length;
+  const newColors = Array(numRows).fill(null).map(() => Array(numCols).fill(null));
+  
+  for (let i = 1; i < data.length; i++) {
+    if (errorRows.has(i)) {
+      newColors[i].fill('#ffdddd'); 
+    } else {
+      newColors[i].fill('#ffffff'); 
+    }
+  }
+  
+  const colorRange = logSheet.getRange(1, 1, numRows, numCols);
+  const currentColors = colorRange.getBackgrounds();
+  newColors[0] = currentColors[0];
+  colorRange.setBackgrounds(newColors);
+  
+  SpreadsheetApp.getUi().alert(`謇灘綾謚懊￠縺ｮ陦後ｒ襍､縺上ワ繧､繝ｩ繧､繝医＠縺ｾ縺励◆縲・n蟇ｾ雎｡陦梧焚: ${errorRows.size}陦形);
+}
+

@@ -1,0 +1,24 @@
+{
+    "app":  "196",
+    "scope":  "ALL",
+    "desktop":  {
+                    "js":  [
+                               "../../shared/js/lkd-engine.js",
+                               "../../shared/js/cascade-engine.js",
+                               "desktop/js/app196_cascade_config.js"
+                           ],
+                    "css":  [
+                                "desktop/css/013.css",
+                                "desktop/css/51-modern-default.css",
+                                "desktop/css/lookup.css"
+                            ]
+                },
+    "mobile":  {
+                   "js":  [
+
+                          ],
+                   "css":  [
+
+                           ]
+               }
+}

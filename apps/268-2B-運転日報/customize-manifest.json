@@ -1,0 +1,25 @@
+{
+    "app":  "268",
+    "scope":  "ALL",
+    "desktop":  {
+                    "js":  [
+                               "desktop/js/距離自動入力_0.js",
+                               "desktop/js/時刻自動入力ボタン.js",
+                               "desktop/js/テンキー.js"
+                           ],
+                    "css":  [
+                                "desktop/css/lookup.css",
+                                "desktop/css/013.css",
+                                "desktop/css/clock.css",
+                                "desktop/css/51-modern-default.css"
+                            ]
+                },
+    "mobile":  {
+                   "js":  [
+
+                          ],
+                   "css":  [
+
+                           ]
+               }
+}
